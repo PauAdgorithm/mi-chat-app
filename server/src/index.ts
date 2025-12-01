@@ -51,7 +51,8 @@ io.on('connection', async (socket) => {
           text: record.get('text') as string,
           sender: record.get('sender') as string,
           timestamp: record.get('timestamp') as string
-        }));
+        }))
+        .filter(msg => msg.text && msg.sender);
 
         socket.emit('history', history);
         console.log(`✅ Enviados ${history.length} mensajes antiguos.`);
