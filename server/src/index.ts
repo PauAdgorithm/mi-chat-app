@@ -131,6 +131,9 @@ const authenticate = (req: any, res: any, next: any) => {
     next();
   });
 };
+app.get('/', (req: any, res: any) => {
+  res.send('Backend de Chat funcionando con Airtable 🚀');
+});
 
 // 4. Obtener Conversaciones
 app.get('/conversations', authenticate, async (req: any, res: any) => {
