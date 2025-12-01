@@ -9,7 +9,7 @@ interface ChatWindowProps {
 interface Message {
   text: string;
   sender: string;
-  timestamp: string | Date; // Puede venir como string de la DB
+  timestamp: string | Date;
 }
 
 export function ChatWindow({ socket, user }: ChatWindowProps) {
@@ -26,20 +26,22 @@ export function ChatWindow({ socket, user }: ChatWindowProps) {
   }, [messages]);
 
   useEffect(() => {
+    // 1. Manejadores de eventos
     const handleMessage = (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
     };
 
-    // NUEVO: Escuchar el historial
     const handleHistory = (history: Message[]) => {
       console.log("📜 Historial recibido:", history.length, "mensajes");
-      setMessages(history); // Reemplazamos/Cargamos el historial inicial
+      setMessages(history); 
     };
     
     if (socket) {
-        // Escuchar nuevos mensajes
+        // 2. ¡AQUÍ ESTÁ LA CLAVE! Pedimos el historial al montar el componente
+        socket.emit('request_history');
+
+        // 3. Escuchamos las respuestas
         socket.on('message', handleMessage);
-        // Escuchar historial antiguo
         socket.on('history', handleHistory);
 
         return () => { 
@@ -54,9 +56,8 @@ export function ChatWindow({ socket, user }: ChatWindowProps) {
     if (input.trim()) {
       const msg = { text: input, sender: user.username, timestamp: new Date() };
       socket.emit('chatMessage', msg);
-      // Nota: Ya no añadimos el mensaje manualmente aquí con setMessages
-      // Esperamos a que el servidor nos lo devuelva con io.emit('message')
-      // para evitar duplicados si la conexión es lenta.
+      // Limpiamos el input pero NO añadimos el mensaje manual.
+      // Esperamos a que el servidor nos lo devuelva con 'io.emit' para evitar duplicados.
       setInput('');
     }
   };
