@@ -1,21 +1,51 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Send, Smile, Paperclip, MessageSquare } from 'lucide-react';
 
 interface ChatWindowProps {
   socket: any;
   user: { username: string };
 }
 
+interface Message {
+  text: string;
+  sender: string;
+  timestamp: string | Date; // Puede venir como string de la DB
+}
+
 export function ChatWindow({ socket, user }: ChatWindowProps) {
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    const handleMessage = (msg: any) => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    const handleMessage = (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
     };
+
+    // NUEVO: Escuchar el historial
+    const handleHistory = (history: Message[]) => {
+      console.log("📜 Historial recibido:", history.length, "mensajes");
+      setMessages(history); // Reemplazamos/Cargamos el historial inicial
+    };
+    
     if (socket) {
+        // Escuchar nuevos mensajes
         socket.on('message', handleMessage);
-        return () => { socket.off('message', handleMessage); };
+        // Escuchar historial antiguo
+        socket.on('history', handleHistory);
+
+        return () => { 
+          socket.off('message', handleMessage); 
+          socket.off('history', handleHistory);
+        };
     }
   }, [socket]);
 
@@ -24,41 +54,83 @@ export function ChatWindow({ socket, user }: ChatWindowProps) {
     if (input.trim()) {
       const msg = { text: input, sender: user.username, timestamp: new Date() };
       socket.emit('chatMessage', msg);
-      // Añadimos el mensaje localmente para verlo al instante
-      setMessages((prev) => [...prev, msg]);
+      // Nota: Ya no añadimos el mensaje manualmente aquí con setMessages
+      // Esperamos a que el servidor nos lo devuelva con io.emit('message')
+      // para evitar duplicados si la conexión es lenta.
       setInput('');
     }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 p-4 overflow-y-auto space-y-4">
+    <div className="flex flex-col h-full bg-slate-50/30">
+      {/* Área de mensajes */}
+      <div className="flex-1 p-6 overflow-y-auto space-y-6">
         {messages.length === 0 && (
-          <div className="text-center text-gray-400 mt-10">
-            <p>Sala de chat vacía</p>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.sender === user.username ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[70%] rounded-lg p-3 ${m.sender === user.username ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
-              <p className="text-xs opacity-75 mb-1">{m.sender}</p>
-              <p>{m.text}</p>
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4 opacity-60">
+            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center">
+              <MessageSquare className="w-8 h-8 text-slate-300" />
+            </div>
+            <div className="text-center">
+              <p className="font-medium">La sala está tranquila...</p>
+              <p className="text-sm">¡Sé el primero en decir hola!</p>
             </div>
           </div>
-        ))}
+        )}
+        
+        {messages.map((m, i) => {
+          const isMe = m.sender === user.username;
+          return (
+            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
+                <div className="flex items-baseline gap-2 mb-1 px-1">
+                  <span className={`text-xs font-bold ${isMe ? 'text-blue-600' : 'text-slate-600'}`}>
+                    {m.sender}
+                  </span>
+                </div>
+                <div 
+                  className={`p-4 rounded-2xl shadow-sm text-sm leading-relaxed ${
+                    isMe 
+                      ? 'bg-blue-600 text-white rounded-br-none shadow-blue-200' 
+                      : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none shadow-sm'
+                  }`}
+                >
+                  <p>{m.text}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={messagesEndRef} />
       </div>
-      <form onSubmit={sendMessage} className="p-4 bg-white border-t flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Escribe un mensaje..."
-          className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button type="submit" className="bg-blue-600 text-white rounded-full px-6 hover:bg-blue-700">
-          Enviar
-        </button>
-      </form>
+
+      {/* Área de Input */}
+      <div className="p-4 bg-white border-t border-slate-100 px-6 pb-6">
+        <form onSubmit={sendMessage} className="flex gap-3 items-end max-w-4xl mx-auto bg-slate-50 p-2 pr-2 rounded-[24px] border border-slate-200 focus-within:ring-4 focus-within:ring-blue-100 focus-within:border-blue-300 transition-all shadow-sm">
+          <button type="button" className="p-3 text-slate-400 hover:text-blue-500 transition-colors rounded-full hover:bg-slate-200">
+            <Paperclip className="w-5 h-5" />
+          </button>
+          
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Escribe un mensaje..."
+            className="flex-1 bg-transparent border-none focus:ring-0 py-3 text-slate-700 placeholder:text-slate-400 font-medium"
+          />
+          
+          <button type="button" className="p-3 text-slate-400 hover:text-yellow-500 transition-colors rounded-full hover:bg-slate-200">
+            <Smile className="w-5 h-5" />
+          </button>
+
+          <button 
+            type="submit" 
+            disabled={!input.trim()}
+            className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-blue-200 hover:shadow-lg active:scale-90"
+          >
+            <Send className="w-5 h-5 ml-0.5" />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
