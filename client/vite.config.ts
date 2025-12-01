@@ -1,15 +1,21 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  
-  // --- ¡ESTA ES LA LÍNEA MÁGICA! ---
-  // Le dice a Vite que use rutas relativas (./)
-  // para que funcione dentro de Electron
-  base: './',
-
-  plugins: [
-    react(),
-  ],
+  plugins: [react()],
+  base: '/', // Asegura que las rutas sean absolutas
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'), // Forzamos a que use index.html como entrada
+      },
+    },
+  },
+  server: {
+    host: true
+  }
 })
