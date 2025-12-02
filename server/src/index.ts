@@ -61,8 +61,7 @@ async function handleContactUpdate(phone: string, text: string) {
           "last_message_time": now
         }
       }], { typecast: true });
-      console.log(`✨ Nuevo contacto creado: ${phone}`);
-      io.emit('contact_updated_notification'); // Avisar para refrescar listas
+      io.emit('contact_updated_notification');
     }
   } catch (error: any) {
     console.error("❌ Error Contactos:", error?.error || error);
@@ -89,7 +88,14 @@ app.post('/webhook', async (req, res) => {
         
         console.log(`📩 WhatsApp de ${from}: ${text}`);
         await handleContactUpdate(from, text);
-        await saveAndEmitMessage({ text: text, sender: from, timestamp: new Date().toISOString() });
+        
+        // Guardamos el mensaje (recipient vacío o "Empresa" porque viene del cliente)
+        await saveAndEmitMessage({ 
+            text: text, 
+            sender: from, 
+            recipient: "Empresa", // Opcional
+            timestamp: new Date().toISOString() 
+        });
       }
       res.sendStatus(200);
     } else res.sendStatus(404);
@@ -125,12 +131,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 2. Enviar MENSAJES
+  // 2. Enviar MENSAJES (CORREGIDO: Busca Enviados y Recibidos)
   socket.on('request_conversation', async (phoneNumber) => {
     if (base) {
       try {
+        // FÓRMULA MÁGICA: (sender = Numero) O (recipient = Numero)
+        const filterFormula = `OR({sender} = '${phoneNumber}', {recipient} = '${phoneNumber}')`;
+
         const records = await base('Messages').select({
-          filterByFormula: `{sender} = '${phoneNumber}'`, 
+          filterByFormula: filterFormula, 
           sort: [{ field: "timestamp", direction: "asc" }]
         }).all();
 
@@ -140,14 +149,13 @@ io.on('connection', (socket) => {
           timestamp: (r.get('timestamp') as string) || new Date().toISOString()
         }));
         socket.emit('conversation_history', messages);
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("Error historial:", e); }
     }
   });
 
-  // 3. NUEVO: Actualizar Info del Cliente (Nombre, Dept, Status)
+  // 3. Actualizar Info Cliente
   socket.on('update_contact_info', async (data) => {
     const { phone, updates } = data;
-    console.log(`📝 Actualizando ${phone}:`, updates);
     if (base) {
       try {
         const records = await base('Contacts').select({
@@ -160,15 +168,13 @@ io.on('connection', (socket) => {
             id: records[0].id,
             fields: updates
           }], { typecast: true });
-          
-          // Avisar a todos los clientes conectados para que refresquen su barra lateral
           io.emit('contact_updated_notification');
         }
-      } catch (e) { console.error("Error update contact:", e); }
+      } catch (e) { console.error("Error update:", e); }
     }
   });
 
-  // 4. Enviar Mensaje
+  // 4. Enviar Mensaje (CORREGIDO: Guarda recipient)
   socket.on('chatMessage', async (msg) => {
     const targetPhone = msg.targetPhone || process.env.TEST_TARGET_PHONE;
     if (waToken && waPhoneId) {
@@ -178,7 +184,15 @@ io.on('connection', (socket) => {
            { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         await saveAndEmitMessage({ text: msg.text, sender: "Agente", targetPhone: targetPhone, timestamp: new Date().toISOString() });
+         
+         // AQUÍ GUARDAMOS EL DESTINATARIO
+         await saveAndEmitMessage({ 
+             text: msg.text, 
+             sender: "Agente", 
+             recipient: targetPhone, // <--- ESTO ES LA CLAVE
+             timestamp: new Date().toISOString() 
+         });
+         
          await handleContactUpdate(targetPhone, `Tú: ${msg.text}`);
        } catch (error: any) { console.error("❌ Error enviando WA:", error.response?.data || error.message); }
     }
@@ -190,7 +204,12 @@ async function saveAndEmitMessage(msg: any) {
   if (base) {
     try {
       await base('Messages').create([{ 
-        fields: { "text": msg.text || "", "sender": msg.sender || "Desc", "timestamp": msg.timestamp || new Date().toISOString() } 
+        fields: { 
+            "text": msg.text || "", 
+            "sender": msg.sender || "Desc", 
+            "recipient": msg.recipient || "", // Guardamos el destinatario en Airtable
+            "timestamp": msg.timestamp || new Date().toISOString() 
+        } 
       }]);
     } catch (e) { console.error("Error guardando msg:", e); }
   }
