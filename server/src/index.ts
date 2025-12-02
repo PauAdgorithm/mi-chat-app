@@ -33,18 +33,17 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- HELPER: GESTIÓN DE CONTACTOS CRM ---
+// --- HELPER: GESTIÓN DE CONTACTOS CRM (CORREGIDO CON TYPECAST) ---
 async function handleContactUpdate(phone: string, text: string) {
   if (!base) return;
   
-  // Limpieza del número para evitar problemas de formato
-  const cleanPhone = phone.replace(/\D/g, ''); // Solo números
+  // Limpiamos el número para búsquedas
+  const cleanPhone = phone.replace(/\D/g, ''); 
 
   console.log(`🔍 Buscando contacto en Airtable: ${cleanPhone}`);
 
   try {
     // 1. Buscamos si el contacto ya existe
-    // NOTA: Asegúrate de que la columna en Airtable se llame 'phone' (minúsculas)
     const contacts = await base('Contacts').select({
       filterByFormula: `{phone} = '${phone}'`,
       maxRecords: 1
@@ -53,37 +52,33 @@ async function handleContactUpdate(phone: string, text: string) {
     const now = new Date().toISOString();
 
     if (contacts.length > 0) {
-      // EXISTE: Actualizamos
-      console.log(`📝 Contacto encontrado (${contacts[0].id}). Actualizando...`);
-      await base('Contacts').update(contacts[0].id, {
-        "last_message": text,
-        "last_message_time": now
-      });
-      console.log(`✅ Contacto actualizado correctamente.`);
+      // EXISTE: Actualizamos su último mensaje
+      // TRUCO: Usamos typecast: true para evitar errores de selección
+      await base('Contacts').update([{
+        id: contacts[0].id,
+        fields: {
+          "last_message": text,
+          "last_message_time": now
+        }
+      }], { typecast: true });
+      console.log(`🔄 Contacto actualizado: ${phone}`);
     } else {
       // NO EXISTE: Creamos uno nuevo
       console.log(`✨ Contacto no existe. Creando nuevo...`);
       await base('Contacts').create([{
         fields: {
           "phone": phone,
-          "name": phone, // Usamos el número como nombre temporal
-          "status": "Nuevo", // ¡Asegúrate que esta opción existe en tu Single Select!
+          "name": phone, // Al principio usamos el número como nombre
+          "status": "Nuevo", // typecast creará esta opción si no existe
           "last_message": text,
           "last_message_time": now
         }
-      }]);
+      }], { typecast: true });
       console.log(`✅ Nuevo contacto creado exitosamente.`);
     }
   } catch (error: any) {
     console.error("❌ ERROR CRÍTICO EN AIRTABLE CONTACTS:");
-    // Imprimimos el error detallado para saber qué columna falla
-    if (error.error) {
-        console.error("Tipo de error:", error.error);
-        console.error("Mensaje:", error.message);
-    } else {
-        console.error(error);
-    }
-    console.error("👉 REVISA: Nombres de columnas en Airtable (phone, status...) y opciones del desplegable.");
+    console.error(error?.error || error);
   }
 }
 
@@ -117,8 +112,7 @@ app.post('/webhook', async (req, res) => {
         
         console.log(`📩 Recibido de ${from}: ${text}`);
 
-        // 1. Actualizamos el CRM (Contactos)
-        // Usamos await para asegurar que se ejecute y ver logs
+        // 1. Actualizamos el CRM (Contactos) - AWAIT IMPORTANTE
         await handleContactUpdate(from, text);
 
         // 2. Guardamos el mensaje y avisamos al frontend
@@ -142,7 +136,7 @@ app.post('/webhook', async (req, res) => {
 io.on('connection', (socket) => {
   console.log(`Cliente conectado: ${socket.id}`);
 
-  // Pedir lista de CONTACTOS (Para la barra lateral)
+  // Pedir lista de CONTACTOS
   socket.on('request_contacts', async () => {
     if (base) {
       try {
@@ -169,14 +163,7 @@ io.on('connection', (socket) => {
   socket.on('request_conversation', async (phoneNumber) => {
     if (base) {
       try {
-        // Buscamos mensajes donde sender sea el cliente O donde nosotros enviamos a ese cliente
-        // Nota: Por simplicidad, aquí asumimos que 'sender' guarda quién envió.
-        // Si el sender es el cliente -> Es un mensaje recibido
-        // Si el sender somos nosotros -> No sale aquí con este filtro simple.
-        // AJUSTE: Filtramos por sender = phoneNumber (recibidos). 
-        // Para un chat bidireccional completo, necesitaríamos guardar "receiver" en Airtable también.
-        // Por ahora, cargamos lo que envía él.
-        
+        // Buscamos mensajes de ese número
         const records = await base('Messages').select({
           filterByFormula: `{sender} = '${phoneNumber}'`, 
           sort: [{ field: "timestamp", direction: "asc" }]
@@ -193,13 +180,12 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Enviar mensaje DESDE la web
   socket.on('chatMessage', async (msg) => {
-    // Cuando el agente responde desde la web
     // msg trae: { text, sender: "Yo/Empresa", targetPhone: "+34..." }
-    
-    // 1. Enviar a WhatsApp
     const targetPhone = msg.targetPhone || process.env.TEST_TARGET_PHONE;
 
+    // 1. Enviar a WhatsApp
     if (waToken && waPhoneId) {
        try {
          await axios.post(
@@ -214,12 +200,11 @@ io.on('connection', (socket) => {
          );
          console.log(`📤 Respondido a ${targetPhone}`);
          
-         // 2. Guardar en Airtable (Como enviado por nosotros)
-         // OJO: Guardamos en 'sender' nuestro nombre o "Agente" para distinguirlo
+         // 2. Guardar en Airtable (Como enviado por Agente)
          await saveAndEmitMessage({
              text: msg.text,
-             sender: "Agente", // Diferenciamos que fuimos nosotros
-             targetPhone: targetPhone, // Guardamos para saber a quién fue (opcional si añades columna)
+             sender: "Agente", 
+             targetPhone: targetPhone, 
              timestamp: new Date().toISOString()
          });
 
@@ -227,14 +212,13 @@ io.on('connection', (socket) => {
          await handleContactUpdate(targetPhone, `Tú: ${msg.text}`);
 
        } catch (error: any) {
-         console.error("❌ Error enviando:", error.response?.data || error.message);
+         console.error("❌ Error enviando a WhatsApp:", error.response?.data || error.message);
        }
     }
   });
 });
 
 async function saveAndEmitMessage(msg: any) {
-  // Emitimos a la web para que se vea en vivo
   io.emit('message', msg); 
   
   if (base) {
@@ -246,7 +230,7 @@ async function saveAndEmitMessage(msg: any) {
             "timestamp": msg.timestamp 
         } 
       }]);
-    } catch (e) { console.error("Error guardando:", e); }
+    } catch (e) { console.error("Error guardando mensaje:", e); }
   }
 }
 
