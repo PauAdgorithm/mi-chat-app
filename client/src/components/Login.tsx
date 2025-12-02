@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, ArrowRight } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (username: string) => void;
@@ -17,39 +17,39 @@ export function Login({ onLogin }: LoginProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[400px] w-full max-w-md px-4">
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full border border-gray-100">
-        <div className="flex flex-col items-center mb-8">
-          <div className="bg-blue-600 p-3 rounded-full mb-4 shadow-lg shadow-blue-200">
+    <div className="flex flex-col items-center justify-center min-h-[400px] w-full max-w-md px-6">
+      <div className="bg-white p-10 rounded-3xl shadow-xl w-full border border-gray-100 relative overflow-hidden">
+        <div className="flex flex-col items-center mb-8 relative z-10">
+          <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 p-4 rounded-2xl mb-5 shadow-lg shadow-blue-200 transform rotate-3">
             <MessageSquare className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-800">¡Bienvenido!</h2>
-          <p className="text-gray-500 text-sm mt-1">Únete al chat global</p>
+          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Bienvenido</h2>
+          <p className="text-slate-500 mt-2 text-center">Ingresa tu nombre para unirte.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2 ml-1">
-              Elige tu nombre
+        <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">
+              Nombre de usuario
             </label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-5 py-3 border border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all duration-200 bg-gray-50 focus:bg-white"
-              placeholder="Ej: Alex, Laura..."
+              className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-50 focus:border-blue-500 outline-none transition-all duration-200 font-medium text-slate-800 placeholder:text-slate-400"
+              placeholder="Ej: Alex..."
               required
             />
           </div>
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-3.5 rounded-xl hover:bg-blue-700 active:scale-95 transition-all duration-200 font-semibold shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
+            className="group w-full bg-slate-900 text-white py-4 rounded-xl hover:bg-blue-600 active:scale-[0.98] transition-all duration-300 font-bold text-lg shadow-lg hover:shadow-blue-500/25 flex items-center justify-center gap-2"
           >
-            Entrar al Chat
+            Comenzar
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
       </div>
-      <p className="mt-8 text-gray-400 text-xs">Chatgorithm v1.0 • Powered by Render</p>
     </div>
   );
 }

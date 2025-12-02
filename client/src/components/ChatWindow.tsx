@@ -4,7 +4,7 @@ import { Send, Smile, Paperclip, MessageSquare } from 'lucide-react';
 interface ChatWindowProps {
   socket: any;
   user: { username: string };
-  targetPhone: string; // ¡Ahora necesitamos saber a quién hablamos!
+  targetPhone: string;
 }
 
 interface Message {
@@ -18,31 +18,21 @@ export function ChatWindow({ socket, user, targetPhone }: ChatWindowProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll al fondo
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
   useEffect(() => scrollToBottom(), [messages]);
 
-  // Cargar conversación al cambiar de cliente (targetPhone)
   useEffect(() => {
-    setMessages([]); // Limpiar chat anterior
+    setMessages([]);
     if (socket && targetPhone) {
-        console.log("Cargando chat con:", targetPhone);
         socket.emit('request_conversation', targetPhone);
     }
   }, [targetPhone, socket]);
 
-  // Escuchar mensajes entrantes
   useEffect(() => {
-    const handleHistory = (history: Message[]) => {
-      setMessages(history);
-    };
-
+    const handleHistory = (history: Message[]) => setMessages(history);
     const handleNewMessage = (msg: any) => {
-        // Solo añadimos el mensaje si pertenece a este chat o si lo enviamos nosotros (Agente)
-        // NOTA: Esto es una simplificación. Lo ideal es filtrar por sender o receiver.
-        // Como 'sender' viene con el número del cliente:
         if (msg.sender === targetPhone || msg.sender === 'Agente') {
             setMessages((prev) => [...prev, msg]);
         }
@@ -51,7 +41,6 @@ export function ChatWindow({ socket, user, targetPhone }: ChatWindowProps) {
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-
         return () => { 
           socket.off('conversation_history', handleHistory);
           socket.off('message', handleNewMessage);
@@ -64,50 +53,43 @@ export function ChatWindow({ socket, user, targetPhone }: ChatWindowProps) {
     if (input.trim()) {
       const msg = { 
           text: input, 
-          sender: user.username, // Nombre del agente
-          targetPhone: targetPhone, // A quién se lo enviamos (Para WhatsApp)
+          sender: user.username,
+          targetPhone: targetPhone,
           timestamp: new Date().toISOString()
       };
-      
       socket.emit('chatMessage', msg);
-      // Optimista: Lo añadimos ya a la lista (aunque el socket lo devuelva luego, React gestiona duplicados por key si usáramos ids)
-      // Pero para evitar duplicados visuales simples, esperamos al evento 'message' del servidor que rebota el mensaje.
-      // Si quieres feedback instantáneo, descomenta esto:
-      // setMessages(prev => [...prev, { ...msg, sender: 'Agente' }]); 
-      
       setInput('');
     }
   };
 
+  // Protección: formatear hora de forma segura
+  const safeTime = (time: string) => {
+      try {
+          return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      } catch { return ''; }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#efeae2] bg-opacity-30"> 
-      {/* (Fondo estilo WhatsApp web sutil) */}
-      
-      {/* Área de mensajes */}
+    <div className="flex flex-col h-full bg-slate-50"> 
       <div className="flex-1 p-6 overflow-y-auto space-y-4">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
             <MessageSquare className="w-12 h-12 mb-2" />
-            <p className="text-sm">Historial cargado. ¡Escribe algo!</p>
+            <p className="text-sm">Historial cargado.</p>
           </div>
         )}
         
         {messages.map((m, i) => {
-          // Si el sender NO es el teléfono del cliente, es el Agente (nosotros)
           const isMe = m.sender !== targetPhone; 
-          
           return (
-            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
+            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div 
                 className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800
-                  ${isMe 
-                    ? 'bg-[#d9fdd3] rounded-tr-none' // Color verde WhatsApp para mí
-                    : 'bg-white rounded-tl-none border border-slate-100' // Blanco para cliente
-                  }`}
+                  ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}
               >
-                <p className="leading-relaxed whitespace-pre-wrap">{m.text}</p>
+                <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
                 <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">
-                  {new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                  {safeTime(m.timestamp)}
                 </span>
               </div>
             </div>
@@ -116,26 +98,16 @@ export function ChatWindow({ socket, user, targetPhone }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Área de Input */}
-      <div className="p-3 bg-[#f0f2f5] border-t border-slate-200">
+      <div className="p-3 bg-white border-t border-slate-200">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto">
-          <button type="button" className="p-2 text-slate-500 hover:bg-slate-200 rounded-full transition">
-            <Paperclip className="w-5 h-5" />
-          </button>
-          
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Escribe un mensaje..."
-            className="flex-1 py-3 px-4 bg-white rounded-lg border border-slate-200 focus:outline-none focus:border-slate-300 text-sm"
+            className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm"
           />
-          
-          <button 
-            type="submit" 
-            disabled={!input.trim()}
-            className="p-3 bg-[#00a884] text-white rounded-full hover:bg-[#008f6f] disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
-          >
+          <button type="submit" disabled={!input.trim()} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm">
             <Send className="w-5 h-5" />
           </button>
         </form>
