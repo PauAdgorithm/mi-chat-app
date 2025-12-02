@@ -36,8 +36,15 @@ const io = new Server(httpServer, {
 // --- HELPER: GESTIÓN DE CONTACTOS CRM ---
 async function handleContactUpdate(phone: string, text: string) {
   if (!base) return;
+  
+  // Limpieza del número para evitar problemas de formato
+  const cleanPhone = phone.replace(/\D/g, ''); // Solo números
+
+  console.log(`🔍 Buscando contacto en Airtable: ${cleanPhone}`);
+
   try {
     // 1. Buscamos si el contacto ya existe
+    // NOTA: Asegúrate de que la columna en Airtable se llame 'phone' (minúsculas)
     const contacts = await base('Contacts').select({
       filterByFormula: `{phone} = '${phone}'`,
       maxRecords: 1
@@ -46,27 +53,37 @@ async function handleContactUpdate(phone: string, text: string) {
     const now = new Date().toISOString();
 
     if (contacts.length > 0) {
-      // EXISTE: Actualizamos su último mensaje
+      // EXISTE: Actualizamos
+      console.log(`📝 Contacto encontrado (${contacts[0].id}). Actualizando...`);
       await base('Contacts').update(contacts[0].id, {
         "last_message": text,
         "last_message_time": now
       });
-      console.log(`🔄 Contacto actualizado: ${phone}`);
+      console.log(`✅ Contacto actualizado correctamente.`);
     } else {
-      // NO EXISTE: Lo creamos nuevo
+      // NO EXISTE: Creamos uno nuevo
+      console.log(`✨ Contacto no existe. Creando nuevo...`);
       await base('Contacts').create([{
         fields: {
           "phone": phone,
-          "name": phone, // Al principio el nombre es el número
-          "status": "Nuevo",
+          "name": phone, // Usamos el número como nombre temporal
+          "status": "Nuevo", // ¡Asegúrate que esta opción existe en tu Single Select!
           "last_message": text,
           "last_message_time": now
         }
       }]);
-      console.log(`✨ Nuevo contacto creado: ${phone}`);
+      console.log(`✅ Nuevo contacto creado exitosamente.`);
     }
-  } catch (error) {
-    console.error("❌ Error actualizando contacto:", error);
+  } catch (error: any) {
+    console.error("❌ ERROR CRÍTICO EN AIRTABLE CONTACTS:");
+    // Imprimimos el error detallado para saber qué columna falla
+    if (error.error) {
+        console.error("Tipo de error:", error.error);
+        console.error("Mensaje:", error.message);
+    } else {
+        console.error(error);
+    }
+    console.error("👉 REVISA: Nombres de columnas en Airtable (phone, status...) y opciones del desplegable.");
   }
 }
 
@@ -101,6 +118,7 @@ app.post('/webhook', async (req, res) => {
         console.log(`📩 Recibido de ${from}: ${text}`);
 
         // 1. Actualizamos el CRM (Contactos)
+        // Usamos await para asegurar que se ejecute y ver logs
         await handleContactUpdate(from, text);
 
         // 2. Guardamos el mensaje y avisamos al frontend
@@ -143,7 +161,7 @@ io.on('connection', (socket) => {
         }));
         
         socket.emit('contacts_update', contacts);
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("Error pidiendo contactos:", e); }
     }
   });
 
