@@ -4,13 +4,13 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import Airtable from 'airtable';
 import dotenv from 'dotenv';
-import axios from 'axios'; // IMPORTANTE: Librería para hablar con WhatsApp
+import axios from 'axios';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
-// IMPORTANTE: Esto permite leer los datos que envía WhatsApp (JSON)
+// IMPORTANTE: Esto permite leer el JSON que envía WhatsApp
 app.use(express.json()); 
 
 const PORT = process.env.PORT || 3000;
@@ -18,8 +18,6 @@ const PORT = process.env.PORT || 3000;
 // --- CONFIGURACIÓN DE VARIABLES ---
 const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
-
-// Variables de WhatsApp (Las pondremos en Render luego)
 const waToken = process.env.WHATSAPP_TOKEN;
 const waPhoneId = process.env.WHATSAPP_PHONE_ID; 
 const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN; 
@@ -29,7 +27,9 @@ let base: Airtable.Base | null = null;
 if (airtableApiKey && airtableBaseId) {
   Airtable.configure({ apiKey: airtableApiKey });
   base = Airtable.base(airtableBaseId);
-  console.log("✅ Airtable configurado");
+  console.log("✅ Airtable configurado correctamente");
+} else {
+  console.warn("⚠️ FALTA CONFIGURACIÓN DE AIRTABLE");
 }
 
 const httpServer = createServer(app);
@@ -37,7 +37,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- 1. VERIFICACIÓN DEL WEBHOOK (Meta te saluda por aquí) ---
+// --- 1. VERIFICACIÓN DEL WEBHOOK (Meta comprueba que existes) ---
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -45,50 +45,72 @@ app.get('/webhook', (req, res) => {
 
   if (mode && token) {
     if (mode === 'subscribe' && token === verifyToken) {
-      console.log('✅ Webhook de WhatsApp verificado!');
+      console.log('✅ Webhook verificado correctamente!');
       res.status(200).send(challenge);
     } else {
+      console.log('❌ Fallo de verificación de token');
       res.sendStatus(403);
     }
   }
 });
 
-// --- 2. RECIBIR MENSAJES DE WHATSAPP ---
+// --- 2. RECIBIR MENSAJES DE WHATSAPP (CON DIAGNÓSTICO) ---
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
+  try {
+    const body = req.body;
+    
+    // LOG CHIVATO: Esto nos dirá qué está llegando exactamente
+    console.log("📥 WEBHOOK RECIBIDO:");
+    console.log(JSON.stringify(body, null, 2)); 
 
-  // Verificar si viene de WhatsApp
-  if (body.object) {
-    if (
-      body.entry &&
-      body.entry[0].changes &&
-      body.entry[0].changes[0].value.messages &&
-      body.entry[0].changes[0].value.messages[0]
-    ) {
-      const messageData = body.entry[0].changes[0].value.messages[0];
-      const from = messageData.from; // Número del cliente
-      const text = messageData.text?.body || "(Archivo multimedia)"; 
+    // Verificar si es un evento válido
+    if (body.object) {
+      if (
+        body.entry &&
+        body.entry[0].changes &&
+        body.entry[0].changes[0].value.messages &&
+        body.entry[0].changes[0].value.messages[0]
+      ) {
+        const messageData = body.entry[0].changes[0].value.messages[0];
+        
+        const from = messageData.from; // Número del cliente
+        const text = messageData.text?.body || "(Multimedia o desconocido)"; 
+        
+        console.log(`✅ MENSAJE VALIDO DE ${from}: ${text}`);
 
-      console.log(`📩 WhatsApp de ${from}: ${text}`);
+        // Guardar y mostrar en la web
+        await saveAndEmitMessage({
+          text: text,
+          sender: from, 
+          timestamp: new Date().toISOString()
+        });
 
-      // Guardar en Airtable y mostrar en tu web
-      await saveAndEmitMessage({
-        text: text,
-        sender: from, // El nombre será el número de teléfono
-        timestamp: new Date().toISOString()
-      });
+      } else if (
+        body.entry &&
+        body.entry[0].changes &&
+        body.entry[0].changes[0].value.statuses
+      ) {
+        // Esto son los ticks (enviado, leído), los ignoramos por ahora
+        const status = body.entry[0].changes[0].value.statuses[0].status;
+        console.log(`ℹ️ Info de estado: ${status}`);
+      } else {
+        console.log("⚠️ Evento recibido pero no es un mensaje de texto.");
+      }
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(404);
     }
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
+  } catch (error) {
+    console.error("❌ ERROR EN WEBHOOK:", error);
+    res.sendStatus(500);
   }
 });
 
-// --- 3. TU CHAT INTERNO (Socket.io) ---
+// --- 3. SOCKET.IO (Tu Chat Web) ---
 io.on('connection', async (socket) => {
   console.log(`Usuario conectado: ${socket.id}`);
 
-  // Cargar historial antiguo
+  // Cargar historial
   socket.on('request_history', async () => {
     if (base) {
       try {
@@ -96,23 +118,26 @@ io.on('connection', async (socket) => {
           maxRecords: 50,
           sort: [{ field: "timestamp", direction: "asc" }]
         }).all();
+        
         const history = records.map(record => ({
           text: record.get('text') as string,
           sender: record.get('sender') as string,
           timestamp: record.get('timestamp') as string
-        })).filter(msg => msg.text && msg.sender);
+        }))
+        // Filtro para quitar mensajes vacíos
+        .filter(msg => msg.text && msg.sender && msg.text.trim() !== "");
+
         socket.emit('history', history);
       } catch (error) { console.error("Error historial:", error); }
     }
   });
 
-  // ENVIAR MENSAJE (Tú escribes en la web -> Va a WhatsApp)
+  // ENVIAR MENSAJE (Web -> WhatsApp)
   socket.on('chatMessage', async (msg) => {
-    // 1. Mostrar en tu pantalla
+    // 1. Mostrar en web y guardar
     await saveAndEmitMessage(msg);
 
     // 2. Enviar a WhatsApp Real
-    // Aquí pondremos el número destino (para pruebas, tu propio móvil)
     const targetPhone = process.env.TEST_TARGET_PHONE; 
 
     if (targetPhone && waToken && waPhoneId) {
@@ -127,26 +152,26 @@ io.on('connection', async (socket) => {
            },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         console.log("📤 Enviado a WhatsApp");
+         console.log("📤 Enviado a WhatsApp correctamente");
        } catch (error: any) {
          console.error("❌ Error enviando a WhatsApp:", error.response?.data || error.message);
        }
     } else {
-        console.log("⚠️ No se envió a WhatsApp (Faltan claves o número destino)");
+        console.log("⚠️ No se envió a WhatsApp: Faltan claves o teléfono destino");
     }
   });
 });
 
-// Función auxiliar para guardar y emitir
+// Función auxiliar para guardar en Airtable y avisar al frontend
 async function saveAndEmitMessage(msg: any) {
-  io.emit('message', msg); // Enviar a la web
+  io.emit('message', msg); 
   if (base) {
     try {
       await base('Messages').create([{ fields: { "text": msg.text, "sender": msg.sender, "timestamp": new Date().toISOString() } }]);
-    } catch (e) { console.error("Error guardando:", e); }
+    } catch (e) { console.error("Error guardando en Airtable:", e); }
   }
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Servidor CRM WhatsApp listo en puerto ${PORT}`);
+  console.log(`🚀 Servidor listo en puerto ${PORT}`);
 });
