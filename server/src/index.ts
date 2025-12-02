@@ -33,17 +33,13 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- HELPER: GESTIÓN DE CONTACTOS CRM (CORREGIDO CON TYPECAST) ---
+// --- HELPER: ACTUALIZAR CONTACTOS ---
 async function handleContactUpdate(phone: string, text: string) {
   if (!base) return;
   
-  // Limpiamos el número para búsquedas
   const cleanPhone = phone.replace(/\D/g, ''); 
 
-  console.log(`🔍 Buscando contacto en Airtable: ${cleanPhone}`);
-
   try {
-    // 1. Buscamos si el contacto ya existe
     const contacts = await base('Contacts').select({
       filterByFormula: `{phone} = '${phone}'`,
       maxRecords: 1
@@ -52,8 +48,6 @@ async function handleContactUpdate(phone: string, text: string) {
     const now = new Date().toISOString();
 
     if (contacts.length > 0) {
-      // EXISTE: Actualizamos su último mensaje
-      // TRUCO: Usamos typecast: true para evitar errores de selección
       await base('Contacts').update([{
         id: contacts[0].id,
         fields: {
@@ -61,28 +55,24 @@ async function handleContactUpdate(phone: string, text: string) {
           "last_message_time": now
         }
       }], { typecast: true });
-      console.log(`🔄 Contacto actualizado: ${phone}`);
     } else {
-      // NO EXISTE: Creamos uno nuevo
-      console.log(`✨ Contacto no existe. Creando nuevo...`);
       await base('Contacts').create([{
         fields: {
           "phone": phone,
-          "name": phone, // Al principio usamos el número como nombre
-          "status": "Nuevo", // typecast creará esta opción si no existe
+          "name": phone, 
+          "status": "Nuevo",
           "last_message": text,
           "last_message_time": now
         }
       }], { typecast: true });
-      console.log(`✅ Nuevo contacto creado exitosamente.`);
+      console.log(`✨ Nuevo contacto creado: ${phone}`);
     }
   } catch (error: any) {
-    console.error("❌ ERROR CRÍTICO EN AIRTABLE CONTACTS:");
-    console.error(error?.error || error);
+    console.error("❌ Error en Airtable Contacts:", error?.error || error);
   }
 }
 
-// --- WEBHOOK (Entrada de WhatsApp) ---
+// --- WEBHOOK WHATSAPP ---
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -98,7 +88,6 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
-    
     if (body.object) {
       if (
         body.entry &&
@@ -110,12 +99,9 @@ app.post('/webhook', async (req, res) => {
         const from = messageData.from; 
         const text = messageData.text?.body || "(Multimedia)"; 
         
-        console.log(`📩 Recibido de ${from}: ${text}`);
+        console.log(`📩 WhatsApp de ${from}: ${text}`);
 
-        // 1. Actualizamos el CRM (Contactos) - AWAIT IMPORTANTE
         await handleContactUpdate(from, text);
-
-        // 2. Guardamos el mensaje y avisamos al frontend
         await saveAndEmitMessage({
           text: text,
           sender: from, 
@@ -134,9 +120,9 @@ app.post('/webhook', async (req, res) => {
 
 // --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  console.log(`Cliente conectado: ${socket.id}`);
+  console.log(`Cliente web conectado: ${socket.id}`);
 
-  // Pedir lista de CONTACTOS
+  // 1. Enviar CONTACTOS (Con limpieza de datos)
   socket.on('request_contacts', async () => {
     if (base) {
       try {
@@ -144,35 +130,35 @@ io.on('connection', (socket) => {
           sort: [{ field: "last_message_time", direction: "desc" }]
         }).all();
         
+        // AQUÍ ESTÁ LA MAGIA: Rellenamos lo que falte
         const contacts = records.map(r => ({
           id: r.id,
-          phone: r.get('phone'),
-          name: r.get('name'),
-          status: r.get('status'),
-          department: r.get('department'),
-          last_message: r.get('last_message'),
-          last_message_time: r.get('last_message_time')
+          phone: (r.get('phone') as string) || "Sin número",
+          name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido",
+          status: (r.get('status') as string) || "Nuevo",
+          department: (r.get('department') as string) || null, // Enviamos null si no hay
+          last_message: (r.get('last_message') as string) || "",
+          last_message_time: (r.get('last_message_time') as string) || new Date().toISOString()
         }));
         
         socket.emit('contacts_update', contacts);
-      } catch (e) { console.error("Error pidiendo contactos:", e); }
+      } catch (e) { console.error("Error contactos:", e); }
     }
   });
 
-  // Pedir MENSAJES de un chat concreto
+  // 2. Enviar MENSAJES de una conversación
   socket.on('request_conversation', async (phoneNumber) => {
     if (base) {
       try {
-        // Buscamos mensajes de ese número
         const records = await base('Messages').select({
           filterByFormula: `{sender} = '${phoneNumber}'`, 
           sort: [{ field: "timestamp", direction: "asc" }]
         }).all();
 
         const messages = records.map(r => ({
-          text: r.get('text'),
-          sender: r.get('sender'),
-          timestamp: r.get('timestamp')
+          text: (r.get('text') as string) || "",
+          sender: (r.get('sender') as string) || "Desconocido",
+          timestamp: (r.get('timestamp') as string) || new Date().toISOString()
         }));
         
         socket.emit('conversation_history', messages);
@@ -180,12 +166,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Enviar mensaje DESDE la web
+  // 3. Recibir mensaje desde la web
   socket.on('chatMessage', async (msg) => {
-    // msg trae: { text, sender: "Yo/Empresa", targetPhone: "+34..." }
     const targetPhone = msg.targetPhone || process.env.TEST_TARGET_PHONE;
 
-    // 1. Enviar a WhatsApp
     if (waToken && waPhoneId) {
        try {
          await axios.post(
@@ -198,9 +182,7 @@ io.on('connection', (socket) => {
            },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         console.log(`📤 Respondido a ${targetPhone}`);
          
-         // 2. Guardar en Airtable (Como enviado por Agente)
          await saveAndEmitMessage({
              text: msg.text,
              sender: "Agente", 
@@ -208,11 +190,10 @@ io.on('connection', (socket) => {
              timestamp: new Date().toISOString()
          });
 
-         // 3. Actualizar el CRM (último mensaje)
          await handleContactUpdate(targetPhone, `Tú: ${msg.text}`);
 
        } catch (error: any) {
-         console.error("❌ Error enviando a WhatsApp:", error.response?.data || error.message);
+         console.error("❌ Error enviando WhatsApp:", error.response?.data || error.message);
        }
     }
   });
@@ -220,14 +201,13 @@ io.on('connection', (socket) => {
 
 async function saveAndEmitMessage(msg: any) {
   io.emit('message', msg); 
-  
   if (base) {
     try {
       await base('Messages').create([{ 
         fields: { 
-            "text": msg.text, 
-            "sender": msg.sender, 
-            "timestamp": msg.timestamp 
+            "text": msg.text || "", 
+            "sender": msg.sender || "Desconocido", 
+            "timestamp": msg.timestamp || new Date().toISOString()
         } 
       }]);
     } catch (e) { console.error("Error guardando mensaje:", e); }
@@ -235,5 +215,5 @@ async function saveAndEmitMessage(msg: any) {
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Servidor CRM listo en puerto ${PORT}`);
+  console.log(`🚀 Servidor listo en puerto ${PORT}`);
 });
