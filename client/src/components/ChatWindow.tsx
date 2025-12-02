@@ -187,7 +187,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         <img 
                             src={`${API_URL}/api/media/${m.mediaId}`} 
                             alt="Imagen" 
-                            className="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition"
+                            className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5"
                             onClick={() => window.open(`${API_URL}/api/media/${m.mediaId}`, '_blank')}
                             loading="lazy"
                         />
