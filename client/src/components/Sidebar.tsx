@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, RefreshCw } from 'lucide-react';
+import { Users, Search, RefreshCw, MessageSquare } from 'lucide-react';
 
-// Definimos cómo es un contacto
 export interface Contact {
   id: string;
   phone: string;
@@ -23,15 +22,19 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
   const [contacts, setContacts] = useState<Contact[]>([]);
 
   useEffect(() => {
-    // Escuchar la lista de contactos del servidor
-    socket.on('contacts_update', (newContacts: Contact[]) => {
-      setContacts(newContacts);
+    if (!socket) return;
+
+    socket.on('contacts_update', (newContacts: any) => {
+      console.log("📥 Contactos recibidos en frontend:", newContacts);
+      // Aseguramos que sea un array para evitar crash
+      if (Array.isArray(newContacts)) {
+        setContacts(newContacts);
+      }
     });
 
-    // Pedir la lista nada más cargar
     socket.emit('request_contacts');
 
-    // Configurar un refresco cada 5 segundos (polling simple)
+    // Polling de seguridad cada 5s
     const interval = setInterval(() => {
       socket.emit('request_contacts');
     }, 5000);
@@ -42,6 +45,23 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
     };
   }, [socket]);
 
+  // Función segura para formatear la hora
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+      return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // Función segura para obtener la inicial
+  const getInitial = (name?: string, phone?: string) => {
+    if (name && name.length > 0) return name.charAt(0).toUpperCase();
+    if (phone && phone.length > 0) return phone.charAt(0).toUpperCase();
+    return '?';
+  };
+
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       {/* Buscador */}
@@ -51,8 +71,8 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <input 
             type="text" 
-            placeholder="Buscar..." 
-            className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            placeholder="Buscar chat..." 
+            className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
           />
         </div>
       </div>
@@ -60,48 +80,54 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
       {/* Lista de Chats */}
       <div className="flex-1 overflow-y-auto">
         {contacts.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">
-            <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin opacity-50" />
-            <p>Esperando mensajes...</p>
+          <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
+            <div className="bg-slate-100 p-3 rounded-full mb-3">
+                <RefreshCw className="w-5 h-5 animate-spin text-blue-400" />
+            </div>
+            <p>Cargando clientes...</p>
+            <p className="text-xs mt-1 text-slate-300">Si no aparecen, envía un WhatsApp para crear el primero.</p>
           </div>
         ) : (
           <ul className="divide-y divide-gray-100">
             {contacts.map((contact) => (
-              <li key={contact.id}>
+              <li key={contact.id || Math.random()}>
                 <button 
                   onClick={() => onSelectContact(contact)}
-                  className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-slate-100 text-left
-                    ${selectedContactId === contact.id ? 'bg-blue-50 border-r-4 border-blue-500' : ''}
+                  className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white hover:shadow-sm text-left group
+                    ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}
                   `}
                 >
-                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold
-                    ${selectedContactId === contact.id ? 'bg-blue-500 shadow-md' : 'bg-slate-300'}
+                  {/* Avatar */}
+                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold shadow-sm transition-transform group-hover:scale-105
+                    ${selectedContactId === contact.id ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-slate-400'}
                   `}>
-                    {contact.name ? contact.name[0].toUpperCase() : <Users className="w-5 h-5" />}
+                    {getInitial(contact.name, contact.phone)}
                   </div>
                   
+                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline mb-1">
                       <span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>
-                        {contact.name || contact.phone}
+                        {contact.name || contact.phone || "Desconocido"}
                       </span>
-                      {contact.last_message_time && (
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(contact.last_message_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                        </span>
-                      )}
+                      <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">
+                        {formatTime(contact.last_message_time)}
+                      </span>
                     </div>
-                    <p className="text-xs text-slate-500 truncate">
-                      {contact.last_message || "Sin mensajes"}
+                    
+                    <p className="text-xs text-slate-500 truncate h-4">
+                      {contact.last_message || "Haz clic para ver el chat"}
                     </p>
                     
-                    {/* Etiquetas (Status/Dept) */}
-                    <div className="flex gap-1 mt-2">
+                    {/* Etiquetas */}
+                    <div className="flex gap-1 mt-2 flex-wrap">
                         {contact.status === 'Nuevo' && (
-                            <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded">NUEVO</span>
+                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>
                         )}
                         {contact.department && (
-                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-medium rounded border border-gray-200">{contact.department}</span>
+                            <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-medium rounded-md border border-blue-100">
+                                {contact.department.toUpperCase()}
+                            </span>
                         )}
                     </div>
                   </div>
