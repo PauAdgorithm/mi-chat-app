@@ -1,188 +1,128 @@
-import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle } from 'lucide-react';
-import { Contact } from './Sidebar';
+import { useState, useEffect } from 'react';
+import { Users, Search, RefreshCw } from 'lucide-react';
 
-interface ChatWindowProps {
-  socket: any;
+// 👇 AQUÍ ESTABA EL ERROR: Faltaba "export" delante de interface
+export interface Contact {
+  id: string;
+  phone: string;
+  name?: string;
+  status?: string;
+  department?: string;
+  last_message?: string;
+  last_message_time?: string;
+}
+
+interface SidebarProps {
   user: { username: string };
-  contact: Contact;
+  socket: any;
+  onSelectContact: (contact: Contact) => void;
+  selectedContactId?: string;
 }
 
-interface Message {
-  text: string;
-  sender: string;
-  timestamp: string;
-}
+export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarProps) {
+  const [contacts, setContacts] = useState<Contact[]>([]);
 
-export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  
-  // Estados locales para los inputs del CRM
-  const [name, setName] = useState(contact.name || '');
-  const [department, setDepartment] = useState(contact.department || '');
-  const [status, setStatus] = useState(contact.status || '');
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Sincronizar inputs cuando cambiamos de chat
   useEffect(() => {
-    setName(contact.name || '');
-    setDepartment(contact.department || '');
-    setStatus(contact.status || '');
+    if (!socket) return;
+
+    socket.on('contacts_update', (newContacts: any) => {
+      if (Array.isArray(newContacts)) {
+        setContacts(newContacts);
+      }
+    });
+
+    socket.emit('request_contacts');
     
-    setMessages([]);
-    if (socket && contact.phone) {
-        socket.emit('request_conversation', contact.phone);
-    }
-  }, [contact, socket]);
+    socket.on('contact_updated_notification', () => {
+        socket.emit('request_contacts');
+    });
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const interval = setInterval(() => socket.emit('request_contacts'), 5000);
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-
-  useEffect(() => {
-    const handleHistory = (history: Message[]) => setMessages(history);
-    const handleNewMessage = (msg: any) => {
-        if (msg.sender === contact.phone || msg.sender === 'Agente') {
-            setMessages((prev) => [...prev, msg]);
-        }
+    return () => {
+      socket.off('contacts_update');
+      socket.off('contact_updated_notification');
+      clearInterval(interval);
     };
-    
-    if (socket) {
-        socket.on('conversation_history', handleHistory);
-        socket.on('message', handleNewMessage);
-        return () => { 
-          socket.off('conversation_history', handleHistory);
-          socket.off('message', handleNewMessage);
-        };
-    }
-  }, [socket, contact.phone]);
+  }, [socket]);
 
-  const sendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (input.trim()) {
-      const msg = { 
-          text: input, 
-          sender: user.username,
-          targetPhone: contact.phone,
-          timestamp: new Date().toISOString()
-      };
-      socket.emit('chatMessage', msg);
-      setInput('');
-    }
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
   };
 
-  // Función para guardar cambios en el CRM
-  const updateCRM = (field: string, value: string) => {
-      if (!socket) return;
-      const updates: any = {};
-      updates[field] = value;
-      
-      socket.emit('update_contact_info', {
-          phone: contact.phone,
-          updates: updates
-      });
-  };
-
-  const safeTime = (time: string) => {
-      try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; }
+  const getInitial = (name?: any, phone?: any) => {
+    const text = String(name || phone || "?");
+    return text.charAt(0).toUpperCase();
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
-      
-      {/* BARRA DE HERRAMIENTAS CRM */}
-      <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap">
-        
-        {/* Input Nombre */}
-        <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
-            <User className="w-4 h-4 text-slate-400" />
-            <input 
-                className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent placeholder:text-slate-400 py-1.5"
-                placeholder="Nombre Cliente"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onBlur={() => updateCRM('name', name)}
-            />
-        </div>
-
-        {/* Selector Departamento */}
-        <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
-            <Briefcase className="w-4 h-4 text-slate-400" />
-            <select 
-                className="text-xs bg-transparent border-none rounded-md py-1.5 pr-8 text-slate-600 focus:ring-0 cursor-pointer font-medium"
-                value={department}
-                onChange={(e) => {
-                    setDepartment(e.target.value);
-                    updateCRM('department', e.target.value);
-                }}
-            >
-                <option value="">Sin Dpto</option>
-                <option value="Ventas">Ventas</option>
-                <option value="Taller">Taller</option>
-                <option value="Administración">Admin</option>
-            </select>
-        </div>
-
-        {/* Selector Estado */}
-        <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
-            <CheckCircle className="w-4 h-4 text-slate-400" />
-            <select 
-                className="text-xs bg-transparent border-none rounded-md py-1.5 pr-8 text-slate-600 focus:ring-0 cursor-pointer font-medium"
-                value={status}
-                onChange={(e) => {
-                    setStatus(e.target.value);
-                    updateCRM('status', e.target.value);
-                }}
-            >
-                <option value="Nuevo">Nuevo</option>
-                <option value="Abierto">Abierto</option>
-                <option value="Cerrado">Cerrado</option>
-            </select>
-        </div>
-      </div>
-
-      <div className="flex-1 p-6 overflow-y-auto space-y-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
-            <MessageSquare className="w-12 h-12 mb-2" />
-            <p className="text-sm">Historial cargado.</p>
-          </div>
-        )}
-        
-        {messages.map((m, i) => {
-          const isMe = m.sender !== contact.phone; 
-          return (
-            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div 
-                className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800
-                  ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}
-              >
-                <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
-                <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="p-3 bg-white border-t border-slate-200">
-        <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribe un mensaje..."
-            className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm"
+    <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
+      <div className="p-4 border-b border-gray-200 bg-white">
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bandeja de Entrada</h2>
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+          <input 
+            type="text" 
+            placeholder="Buscar chat..." 
+            className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           />
-          <button type="submit" disabled={!input.trim()} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm">
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {contacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
+            <RefreshCw className="w-5 h-5 animate-spin text-blue-400 mb-2" />
+            <p>Cargando clientes...</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {contacts.map((contact) => (
+              <li key={contact.id || Math.random()}>
+                <button 
+                  onClick={() => onSelectContact(contact)}
+                  className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group
+                    ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500' : 'border-l-4 border-transparent'}
+                  `}
+                >
+                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold
+                    ${selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400'}
+                  `}>
+                    {getInitial(contact.name, contact.phone)}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm font-bold truncate text-slate-700">
+                        {String(contact.name || contact.phone || "Desconocido")}
+                      </span>
+                      <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">
+                        {formatTime(contact.last_message_time)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate h-4">
+                      {String(contact.last_message || "Haz clic para ver el chat")}
+                    </p>
+                    
+                    <div className="flex gap-1 mt-2 flex-wrap">
+                        {contact.status && (
+                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded">
+                                {String(contact.status).toUpperCase()}
+                            </span>
+                        )}
+                        {contact.department && (
+                            <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-medium rounded border border-blue-100">
+                                {String(contact.department).toUpperCase()}
+                            </span>
+                        )}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
