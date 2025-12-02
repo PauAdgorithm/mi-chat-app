@@ -58,7 +58,8 @@ function App() {
             </header>
             <div className="flex-1 overflow-hidden relative">
               {selectedContact ? (
-                <ChatWindow socket={socket} user={user} targetPhone={selectedContact.phone} />
+                // Pasamos el contacto completo para que el panel de control sepa los datos actuales
+                <ChatWindow socket={socket} user={user} contact={selectedContact} />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
                   <MessageCircle className="w-16 h-16 mb-4 opacity-50" />
