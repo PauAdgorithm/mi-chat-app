@@ -26,9 +26,11 @@ const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN;
 
 let base: Airtable.Base | null = null;
 if (airtableApiKey && airtableBaseId) {
-  Airtable.configure({ apiKey: airtableApiKey });
-  base = Airtable.base(airtableBaseId);
-  console.log("✅ Airtable configurado");
+  try {
+    Airtable.configure({ apiKey: airtableApiKey });
+    base = Airtable.base(airtableBaseId);
+    console.log("✅ Airtable configurado");
+  } catch (e) { console.error("Error Airtable config:", e); }
 }
 
 const httpServer = createServer(app);
@@ -36,50 +38,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- HELPER: GESTIÓN DE CONTACTOS CON NOMBRE REAL ---
-// Ahora acepta un tercer parámetro opcional: profileName
-async function handleContactUpdate(phone: string, text: string, profileName?: string) {
-  if (!base) return;
-  const cleanPhone = phone.replace(/\D/g, ''); 
-
-  try {
-    const contacts = await base('Contacts').select({
-      filterByFormula: `{phone} = '${phone}'`,
-      maxRecords: 1
-    }).firstPage();
-
-    const now = new Date().toISOString();
-
-    if (contacts.length > 0) {
-      // Si ya existe, solo actualizamos el último mensaje
-      await base('Contacts').update([{
-        id: contacts[0].id,
-        fields: { "last_message": text, "last_message_time": now }
-      }], { typecast: true });
-    } else {
-      // SI ES NUEVO: Usamos el nombre de WhatsApp si existe
-      // Formato: "34666... (Pau)"
-      const newName = profileName ? `${phone} (${profileName})` : phone;
-
-      await base('Contacts').create([{
-        fields: {
-          "phone": phone,
-          "name": newName, // <--- AQUÍ GUARDAMOS EL NOMBRE
-          "status": "Nuevo",
-          "last_message": text,
-          "last_message_time": now
-        }
-      }], { typecast: true });
-      
-      console.log(`✨ Nuevo contacto creado: ${newName}`);
-      io.emit('contact_updated_notification');
-    }
-  } catch (error: any) {
-    console.error("❌ Error Contactos:", error?.error || error);
-  }
-}
-
-// --- RUTA: TUNEL MEDIA ---
+// --- RUTA: TUNEL MEDIA (Descargar fotos/audios de Meta) ---
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
@@ -95,101 +54,128 @@ app.get('/api/media/:id', async (req, res) => {
     } catch (e) { res.sendStatus(404); }
 });
 
-// --- RUTA: SUBIR IMAGEN ---
+// --- RUTA: SUBIR ARCHIVOS (Imágenes y Audios) ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
     const targetPhone = req.body.targetPhone;
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
+    // Detectar tipo de archivo
+    const isAudio = file.mimetype.includes('audio');
+    const msgType = isAudio ? 'audio' : 'image';
+
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
 
+    // 1. Subir a Meta
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, {
         headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() }
     });
     const mediaId = uploadRes.data.id;
 
-    await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, {
-        messaging_product: "whatsapp", to: targetPhone, type: "image", image: { id: mediaId }
-    }, { headers: { Authorization: `Bearer ${waToken}` } });
+    // 2. Enviar mensaje
+    const messagePayload: any = {
+        messaging_product: "whatsapp", 
+        to: targetPhone, 
+        type: msgType
+    };
+    // WhatsApp pide objetos distintos según el tipo
+    if (isAudio) messagePayload.audio = { id: mediaId };
+    else messagePayload.image = { id: mediaId };
 
-    await saveAndEmitMessage({
-        text: "📷 Imagen enviada", sender: "Agente", recipient: targetPhone,
-        timestamp: new Date().toISOString(), type: "image", mediaId: mediaId
+    await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, messagePayload, { 
+        headers: { Authorization: `Bearer ${waToken}` } 
     });
-    await handleContactUpdate(targetPhone, "Tú: 📷 Imagen");
+
+    // 3. Guardar en Airtable
+    const textLog = isAudio ? "🎤 [Audio enviado]" : "📷 [Imagen enviada]";
+    await saveAndEmitMessage({
+        text: textLog, 
+        sender: "Agente", 
+        recipient: targetPhone,
+        timestamp: new Date().toISOString(),
+        type: msgType,
+        mediaId: mediaId
+    });
+    await handleContactUpdate(targetPhone, `Tú: ${textLog}`);
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: "Error upload" }); }
+  } catch (error: any) { 
+      console.error("Error upload:", error.response?.data || error.message);
+      res.status(500).json({ error: "Error subiendo archivo" }); 
+  }
 });
 
 // --- WEBHOOK ---
 app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  if (mode === 'subscribe' && token === verifyToken) res.status(200).send(req.query['hub.challenge']);
-  else res.sendStatus(403);
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) {
+    res.status(200).send(req.query['hub.challenge']);
+  } else res.sendStatus(403);
 });
 
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
-    if (body.object) {
-      // Comprobamos si hay mensajes
-      if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
+    if (body.object && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
         const value = body.entry[0].changes[0].value;
-        const messageData = value.messages[0];
+        const msgData = value.messages[0];
         
-        // --- AQUÍ ATRAPAMOS EL NOMBRE DEL PERFIL ---
-        const contacts = value.contacts;
-        let profileName = "";
-        if (contacts && contacts[0] && contacts[0].profile) {
-            profileName = contacts[0].profile.name;
-        }
-        
-        const from = messageData.from; 
+        // Capturar nombre perfil
+        const profileName = value.contacts?.[0]?.profile?.name || "";
+        const from = msgData.from; 
         
         let text = "(Desconocido)";
-        let type = messageData.type;
+        let type = msgData.type;
         let mediaId = "";
 
-        if (type === 'text') text = messageData.text.body;
+        if (type === 'text') text = msgData.text.body;
         else if (type === 'image') {
-            text = messageData.image.caption || "📷 Imagen recibida";
-            mediaId = messageData.image.id;
+            text = msgData.image.caption || "📷 Imagen recibida";
+            mediaId = msgData.image.id;
+        } else if (type === 'audio' || type === 'voice') {
+            text = "🎤 Audio recibido";
+            mediaId = (msgData.audio || msgData.voice).id;
+            type = 'audio'; // Normalizamos 'voice' a 'audio'
         }
         
-        console.log(`📩 De ${from} (${profileName}): ${text}`);
+        console.log(`📩 De ${from}: ${text}`);
         
-        // Pasamos el nombre al helper para que lo guarde en Airtable
         await handleContactUpdate(from, text, profileName);
-        
         await saveAndEmitMessage({ 
             text, sender: from, timestamp: new Date().toISOString(), type, mediaId 
         });
-      }
-      res.sendStatus(200);
-    } else res.sendStatus(404);
-  } catch (error) { 
-      console.error("Error Webhook:", error);
-      res.sendStatus(500); 
-  }
+    }
+    res.sendStatus(200);
+  } catch (e) { console.error("Error Webhook:", e); res.sendStatus(500); }
 });
+
+// --- HELPERS ---
+async function handleContactUpdate(phone: string, text: string, profileName?: string) {
+  if (!base) return;
+  const cleanPhone = phone.replace(/\D/g, ''); 
+  try {
+    const contacts = await base('Contacts').select({ filterByFormula: `{phone} = '${phone}'`, maxRecords: 1 }).firstPage();
+    const now = new Date().toISOString();
+    
+    if (contacts.length > 0) {
+      await base('Contacts').update([{ id: contacts[0].id, fields: { "last_message": text, "last_message_time": now } }], { typecast: true });
+    } else {
+      const newName = profileName ? `${phone} (${profileName})` : phone;
+      await base('Contacts').create([{ fields: { "phone": phone, "name": newName, "status": "Nuevo", "last_message": text, "last_message_time": now } }], { typecast: true });
+      io.emit('contact_updated_notification');
+    }
+  } catch (e) { console.error("Error Contactos:", e); }
+}
 
 // --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  // 1. Enviar CONTACTOS
   socket.on('request_contacts', async () => {
     if (base) {
       try {
-        const records = await base('Contacts').select({
-          sort: [{ field: "last_message_time", direction: "desc" }]
-        }).all();
-        
-        const contacts = records.map(r => {
+        const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all();
+        socket.emit('contacts_update', records.map(r => {
             const avatarField = r.get('avatar') as any[];
-            const avatarUrl = (avatarField && avatarField.length > 0) ? avatarField[0].url : null;
             return {
               id: r.id,
               phone: (r.get('phone') as string) || "",
@@ -198,19 +184,17 @@ io.on('connection', (socket) => {
               department: (r.get('department') as string) || "",
               last_message: (r.get('last_message') as string) || "",
               last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(),
-              avatar: avatarUrl
+              avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null
             };
-        });
-        socket.emit('contacts_update', contacts);
-      } catch (e) { console.error("Error contactos:", e); }
+        }));
+      } catch (e) { console.error("Error req contacts:", e); }
     }
   });
 
-  // 2. Enviar MENSAJES
-  socket.on('request_conversation', async (phoneNumber) => {
+  socket.on('request_conversation', async (phone) => {
     if (base) {
       const records = await base('Messages').select({
-        filterByFormula: `OR({sender} = '${phoneNumber}', {recipient} = '${phoneNumber}')`, 
+        filterByFormula: `OR({sender} = '${phone}', {recipient} = '${phone}')`, 
         sort: [{ field: "timestamp", direction: "asc" }]
       }).all();
       socket.emit('conversation_history', records.map(r => ({
@@ -223,18 +207,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Actualizar Info
   socket.on('update_contact_info', async (data) => {
-    if (base) {
-        const records = await base('Contacts').select({ filterByFormula: `{phone} = '${data.phone}'`, maxRecords: 1 }).firstPage();
-        if (records.length > 0) {
-            await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true });
-            io.emit('contact_updated_notification');
-        }
-    }
+      if(base) {
+          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${data.phone}'`, maxRecords: 1 }).firstPage();
+          if (records.length > 0) {
+              await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true });
+              io.emit('contact_updated_notification');
+          }
+      }
   });
 
-  // 4. Enviar Mensaje Texto
   socket.on('chatMessage', async (msg) => {
     const targetPhone = msg.targetPhone || process.env.TEST_TARGET_PHONE;
     if (waToken && waPhoneId) {
@@ -269,6 +251,4 @@ async function saveAndEmitMessage(msg: any) {
   }
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`🚀 SERVIDOR ONLINE en puerto ${PORT}`);
-});
+httpServer.listen(PORT, () => { console.log(`🚀 Listo ${PORT}`); });
