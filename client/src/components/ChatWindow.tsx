@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X } from 'lucide-react';
 import { Contact } from './Sidebar';
 
 interface ChatWindowProps {
@@ -12,32 +12,32 @@ interface Message {
   text: string;
   sender: string;
   timestamp: string;
-  type?: string;     // Nuevo: tipo de mensaje (text, image)
-  mediaId?: string;  // Nuevo: ID para descargar la foto
+  type?: string;
+  mediaId?: string;
 }
 
 export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isUploading, setIsUploading] = useState(false); // Estado de carga para el clip
+  const [isUploading, setIsUploading] = useState(false);
   
-  // Estados para el CRM
+  // Estados CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // Referencia al input invisible
+  // Estado para el Lightbox (imagen en grande)
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // Detectar entorno para las URLs de las imágenes
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com' : 'http://localhost:3000';
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  
   useEffect(() => scrollToBottom(), [messages]);
 
-  // Resetear estados al cambiar de chat
   useEffect(() => {
     setName(contact.name || '');
     setDepartment(contact.department || '');
@@ -49,12 +49,9 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   }, [contact, socket]);
 
-  // Escuchar mensajes entrantes
   useEffect(() => {
     const handleHistory = (history: Message[]) => setMessages(history);
-    
     const handleNewMessage = (msg: any) => {
-        // Añadimos el mensaje si es de este chat (enviado por cliente o por nosotros)
         if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
             setMessages((prev) => [...prev, msg]);
         }
@@ -85,12 +82,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
-  // --- SUBIDA DE IMÁGENES ---
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
         const file = e.target.files[0];
         setIsUploading(true);
-
         const formData = new FormData();
         formData.append('file', file);
         formData.append('targetPhone', contact.phone);
@@ -101,16 +96,14 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                 method: 'POST',
                 body: formData
             });
-
             if (!response.ok) throw new Error('Error subiendo imagen');
             console.log("Imagen enviada correctamente");
-
         } catch (error) {
             console.error(error);
             alert("Error al enviar la imagen. Revisa la consola.");
         } finally {
             setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = ''; // Limpiar input
+            if (fileInputRef.current) fileInputRef.current.value = '';
         }
     }
   };
@@ -127,8 +120,29 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50 relative">
       
+      {/* --- LIGHTBOX (MODAL DE IMAGEN EN GRANDE) --- */}
+      {selectedImage && (
+        <div 
+            className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={() => setSelectedImage(null)} // Cerrar al hacer click fuera
+        >
+            <button 
+                className="absolute top-4 right-4 text-white/70 hover:text-white p-2 rounded-full bg-white/10 hover:bg-white/20 transition z-50"
+                onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }} // Cerrar con la X
+            >
+                <X className="w-6 h-6" />
+            </button>
+            <img 
+                src={selectedImage} 
+                alt="Imagen en grande" 
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300"
+                onClick={(e) => e.stopPropagation()} // Evitar cerrar al hacer click en la imagen
+            />
+        </div>
+      )}
+
       {/* BARRA SUPERIOR CRM */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
@@ -181,21 +195,23 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                   ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}
                 `}
               >
-                {/* LÓGICA DE IMAGEN VS TEXTO */}
                 {m.type === 'image' && m.mediaId ? (
-                    <div className="mb-1">
+                    <div className="mb-1 group relative">
                         <img 
                             src={`${API_URL}/api/media/${m.mediaId}`} 
                             alt="Imagen" 
                             className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5"
-                            onClick={() => window.open(`${API_URL}/api/media/${m.mediaId}`, '_blank')}
+                            // AL HACER CLIC, ABRIMOS EL LIGHTBOX
+                            onClick={() => setSelectedImage(`${API_URL}/api/media/${m.mediaId}`)}
                             loading="lazy"
                         />
-                        {/* Si el texto no es el automático, lo mostramos debajo */}
+                        {/* Overlay con icono de lupa al pasar el ratón */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition rounded-lg pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <ImageIcon className="text-white w-8 h-8 drop-shadow-lg" />
+                        </div>
                         {m.text && !m.text.includes("Imagen") && <p className="mt-2 text-sm">{m.text}</p>}
                     </div>
                 ) : (
-                    // Si el mensaje es una imagen antigua sin ID o es texto normal
                     m.text.includes("[Imagen") || m.type === 'image' ? (
                         <div className="flex items-center gap-2 italic text-slate-500">
                             <ImageIcon className="w-4 h-4" />
@@ -205,7 +221,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
                     )
                 )}
-
                 <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">
                     {safeTime(m.timestamp)}
                 </span>
@@ -219,41 +234,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto">
-          {/* Input file oculto */}
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileSelect} 
-            accept="image/*" 
-            className="hidden" 
-          />
-          
-          <button 
-            type="button" 
-            onClick={() => fileInputRef.current?.click()} 
-            disabled={isUploading}
-            className={`p-2 rounded-full transition ${isUploading ? 'bg-gray-100 animate-pulse cursor-wait' : 'text-slate-500 hover:bg-slate-200'}`}
-            title="Enviar imagen"
-          >
-            <Paperclip className="w-5 h-5" />
-          </button>
-          
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={isUploading ? "Subiendo..." : "Escribe un mensaje..."}
-            disabled={isUploading}
-            className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm disabled:opacity-50"
-          />
-          
-          <button 
-            type="submit" 
-            disabled={!input.trim() || isUploading}
-            className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className={`p-2 rounded-full transition ${isUploading ? 'bg-gray-100 animate-pulse cursor-wait' : 'text-slate-500 hover:bg-slate-200'}`} title="Enviar imagen"><Paperclip className="w-5 h-5" /></button>
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Subiendo..." : "Escribe un mensaje..."} disabled={isUploading} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm disabled:opacity-50" />
+          <button type="submit" disabled={!input.trim() || isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"><Send className="w-5 h-5" /></button>
         </form>
       </div>
     </div>
