@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -17,39 +17,57 @@ interface Message {
   mediaId?: string;
 }
 
-// --- COMPONENTE DE AUDIO PERSONALIZADO (DISEÑO PRO) ---
+// --- REPRODUCTOR DE AUDIO PRO (Velocidad + Volumen) ---
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  
+  // Nuevos estados
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // Efecto para aplicar volumen y velocidad cuando cambian
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [playbackRate, volume, isMuted]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
-
-    if (isPlaying) {
-      audio.pause();
-    } else {
-      audio.play();
-    }
+    if (isPlaying) audio.pause();
+    else audio.play();
     setIsPlaying(!isPlaying);
   };
+
+  const toggleSpeed = () => {
+    const speeds = [1, 1.25, 1.5, 2];
+    const nextIndex = (speeds.indexOf(playbackRate) + 1) % speeds.length;
+    setPlaybackRate(speeds[nextIndex]);
+  };
+
+  const toggleMute = () => setIsMuted(!isMuted);
 
   const onTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio) return;
     const current = audio.currentTime;
-    const total = audio.duration;
+    const total = audio.duration || 1;
     setCurrentTime(current);
     setProgress((current / total) * 100);
   };
 
   const onLoadedMetadata = () => {
     const audio = audioRef.current;
-    if (!audio) return;
-    setDuration(audio.duration);
+    if (audio) setDuration(audio.duration);
   };
 
   const onEnded = () => {
@@ -74,7 +92,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   };
 
   return (
-    <div className={`flex items-center gap-3 p-2 rounded-xl min-w-[280px] ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
+    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[320px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
       <audio
         ref={audioRef}
         src={src}
@@ -84,6 +102,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
         className="hidden"
       />
       
+      {/* Botón Play/Pause */}
       <button 
         onClick={togglePlay}
         className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-500 text-white hover:bg-slate-600'}`}
@@ -91,20 +110,64 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
         {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
       </button>
 
-      <div className="flex-1 flex flex-col justify-center">
+      {/* Barra de Progreso */}
+      <div className="flex-1 flex flex-col justify-center mx-1">
         <input
           type="range"
           min="0"
           max="100"
           value={progress}
           onChange={handleSeek}
-          className="w-full h-1.5 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-slate-600"
+          className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-600 bg-gray-300'}`}
         />
       </div>
 
-      <div className="text-xs font-mono font-medium text-slate-600 min-w-[35px] text-right">
-        {/* Si no ha empezado (0s), muestra duración total. Si ya empezó, muestra tiempo actual */}
+      {/* Tiempo */}
+      <div className="text-[10px] font-mono font-medium text-slate-600 w-[35px] text-right tabular-nums">
         {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
+      </div>
+
+      {/* Botón Velocidad */}
+      <button 
+        onClick={toggleSpeed}
+        className="px-1.5 py-0.5 bg-black/10 hover:bg-black/20 rounded text-[10px] font-bold text-slate-700 min-w-[28px] text-center transition"
+        title="Cambiar velocidad"
+      >
+        {playbackRate}x
+      </button>
+
+      {/* Control Volumen (Hover para mostrar slider) */}
+      <div 
+        className="relative flex items-center"
+        onMouseEnter={() => setShowVolumeSlider(true)}
+        onMouseLeave={() => setShowVolumeSlider(false)}
+      >
+        <button 
+            onClick={toggleMute}
+            className="p-1 text-slate-500 hover:text-slate-700 transition"
+        >
+            {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+        
+        {/* Slider de Volumen Flotante */}
+        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-lg rounded-lg p-2 transition-all duration-200 ${showVolumeSlider ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+            <div className="h-24 w-6 flex items-center justify-center">
+                <input 
+                    type="range" 
+                    min="0" 
+                    max="1" 
+                    step="0.1"
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => {
+                        setVolume(parseFloat(e.target.value));
+                        setIsMuted(parseFloat(e.target.value) === 0);
+                    }}
+                    className="-rotate-90 w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+            </div>
+            {/* Triangulito decorativo */}
+            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white rotate-45"></div>
+        </div>
       </div>
     </div>
   );
@@ -140,10 +203,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     setMessages([]);
     setShowEmojiPicker(false);
     setIsRecording(false);
-    
-    if (socket && contact.phone) {
-        socket.emit('request_conversation', contact.phone);
-    }
+    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
 
   useEffect(() => {
@@ -153,7 +213,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             setMessages((prev) => [...prev, msg]);
         }
     };
-    
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
@@ -180,26 +239,22 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+        const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) audioChunksRef.current.push(event.data);
-        };
-
+        mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const audioFile = new File([audioBlob], "voice_note.webm", { type: 'audio/webm' });
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+            const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+            const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
             await uploadFile(audioFile);
             stream.getTracks().forEach(track => track.stop());
         };
-
         mediaRecorder.start();
         setIsRecording(true);
-    } catch (error: any) {
-        alert(`Error micrófono: ${error.message}`);
-    }
+    } catch (error: any) { alert(`Error micrófono: ${error.message}`); }
   };
 
   const stopRecording = () => {
@@ -215,17 +270,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         formData.append('file', file);
         formData.append('targetPhone', contact.phone);
         formData.append('senderName', user.username);
-
         try {
-            const response = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
-            if (!response.ok) throw new Error('Error upload');
-        } catch (error) {
-            console.error(error);
-            alert("Error al enviar archivo.");
-        } finally {
-            setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
+            await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
+        } catch (error) { alert("Error envio"); } 
+        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -239,7 +287,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       const updates: any = {}; updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
-
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
   return (
@@ -297,7 +344,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                             <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
-                        // USAMOS EL REPRODUCTOR PERSONALIZADO
+                        // USAMOS EL REPRODUCTOR PRO
                         <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                     ) : m.type === 'document' && m.mediaId ? (
                         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
@@ -330,18 +377,22 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar">
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar archivo">
             <Paperclip className="w-5 h-5" />
           </button>
           
           <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
-          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
+          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+            <Smile className="w-5 h-5" />
+          </button>
 
           {input.trim() ? (
               <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button>
           ) : (
-              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">{isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}</button>
+              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">
+                {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}
+              </button>
           )}
         </form>
       </div>
