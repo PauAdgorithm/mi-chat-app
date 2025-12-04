@@ -54,71 +54,58 @@ app.get('/api/media/:id', async (req, res) => {
     } catch (e) { res.sendStatus(404); }
 });
 
-// --- RUTA: SUBIR ARCHIVOS (FOTOS, AUDIOS Y DOCS) ---
+// --- SUBIR ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
     const targetPhone = req.body.targetPhone;
+    const senderName = req.body.senderName || "Agente"; // Recibimos el nombre del frontend
+
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
-    // 1. Detectar tipo
     const mime = file.mimetype;
-    let msgType = 'document'; // Por defecto, es un documento
-
-    // Imágenes válidas para WhatsApp (Solo JPG y PNG son seguras como "image")
-    if (mime === 'image/jpeg' || mime === 'image/png') {
-        msgType = 'image';
-    } else if (mime.startsWith('audio/')) {
-        msgType = 'audio';
-    }
-    // Todo lo demás (SVG, PDF, ZIP...) se queda como 'document'
-
-    console.log(`📤 Subiendo ${msgType} (${mime}) para ${targetPhone}...`);
+    let msgType = 'document'; 
+    if (mime === 'image/jpeg' || mime === 'image/png') msgType = 'image';
+    else if (mime.startsWith('audio/')) msgType = 'audio';
 
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
 
-    // 2. Subir a Meta
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, {
         headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() }
     });
     const mediaId = uploadRes.data.id;
 
-    // 3. Enviar mensaje
     const messagePayload: any = {
-        messaging_product: "whatsapp", 
-        to: targetPhone, 
-        type: msgType
+        messaging_product: "whatsapp", to: targetPhone, type: msgType
     };
-
     if (msgType === 'image') messagePayload.image = { id: mediaId };
     else if (msgType === 'audio') messagePayload.audio = { id: mediaId };
-    else messagePayload.document = { id: mediaId, filename: file.originalname }; // Docs necesitan filename
+    else messagePayload.document = { id: mediaId, filename: file.originalname };
 
     await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, messagePayload, { 
         headers: { Authorization: `Bearer ${waToken}` } 
     });
 
-    // 4. Guardar en Airtable
-    let textLog = file.originalname; // Guardamos el nombre del archivo
+    let textLog = file.originalname;
     if (msgType === 'image') textLog = "📷 [Imagen]";
     else if (msgType === 'audio') textLog = "🎤 [Audio]";
 
+    // GUARDAMOS CON NOMBRE CORRECTO
     await saveAndEmitMessage({
         text: textLog, 
-        sender: "msg.sender", 
+        sender: senderName, // <--- USAMOS EL NOMBRE REAL AQUÍ
         recipient: targetPhone,
         timestamp: new Date().toISOString(),
         type: msgType,
         mediaId: mediaId
     });
     
-    await handleContactUpdate(targetPhone, `Tú: 📎 Archivo`);
+    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
     res.json({ success: true });
 
   } catch (error: any) { 
-      console.error("Error upload:", error.response?.data || error.message);
       res.status(500).json({ error: "Error subiendo archivo" }); 
   }
 });
@@ -145,31 +132,19 @@ app.post('/webhook', async (req, res) => {
         let mediaId = "";
 
         if (type === 'text') text = msgData.text.body;
-        else if (type === 'image') {
-            text = msgData.image.caption || "📷 Imagen recibida";
-            mediaId = msgData.image.id;
-        } else if (type === 'audio' || type === 'voice') {
-            text = "🎤 Audio recibido";
-            mediaId = (msgData.audio || msgData.voice).id;
-            type = 'audio';
-        } else if (type === 'document') {
-            text = msgData.document.filename || "📄 Documento";
-            mediaId = msgData.document.id;
-        } else if (type === 'sticker') {
-            text = "👾 Sticker";
-        } else {
-            text = `[${type}]`;
-        }
+        else if (type === 'image') { text = msgData.image.caption || "📷 Imagen"; mediaId = msgData.image.id; }
+        else if (type === 'audio' || type === 'voice') { text = "🎤 Audio"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; }
+        else if (type === 'document') { text = msgData.document.filename || "📄 Documento"; mediaId = msgData.document.id; }
+        else if (type === 'sticker') text = "👾 Sticker";
         
         console.log(`📩 De ${from}: ${text}`);
         await handleContactUpdate(from, text, profileName);
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
     res.sendStatus(200);
-  } catch (e) { console.error("Error Webhook:", e); res.sendStatus(500); }
+  } catch (e) { console.error(e); res.sendStatus(500); }
 });
 
-// --- HELPERS ---
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
   if (!base) return;
   const cleanPhone = phone.replace(/\D/g, ''); 
@@ -187,10 +162,7 @@ async function handleContactUpdate(phone: string, text: string, profileName?: st
   } catch (e) { console.error("Error Contactos:", e); }
 }
 
-// --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  // ... (Mismo código de sockets que tenías antes: request_contacts, request_conversation, update_contact_info)
-  // IMPORTANTE: COPIA ESTO O ASEGÚRATE DE QUE NO SE BORRE
   socket.on('request_contacts', async () => {
     if (base) {
       try {
@@ -247,8 +219,16 @@ io.on('connection', (socket) => {
            { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         await saveAndEmitMessage({ text: msg.text, sender: "msg.sender", recipient: targetPhone, timestamp: new Date().toISOString() });
-         await handleContactUpdate(targetPhone, `Tú: ${msg.text}`);
+         
+         // ✅ CORRECCIÓN CLAVE: Usamos msg.sender SIN COMILLAS (es la variable)
+         await saveAndEmitMessage({ 
+             text: msg.text, 
+             sender: msg.sender,  // <--- AQUÍ ESTABA EL FALLO
+             recipient: targetPhone, 
+             timestamp: new Date().toISOString() 
+         });
+         
+         await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`);
        } catch (error: any) { console.error("Error envío:", error.message); }
     }
   });
