@@ -17,18 +17,16 @@ interface Message {
   mediaId?: string;
 }
 
-// --- REPRODUCTOR DE AUDIO (DISEÑO MEJORADO) ---
+// --- REPRODUCTOR DE AUDIO PRO ---
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  
   const [playbackRate, setPlaybackRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
-
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -41,26 +39,21 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (isPlaying) audio.pause();
-    else audio.play();
+    if (isPlaying) audio.pause(); else audio.play();
     setIsPlaying(!isPlaying);
   };
 
   const toggleSpeed = () => {
-    const speeds = [1, 1.5, 2];
+    const speeds = [1, 1.25, 1.5, 2];
     const nextIndex = (speeds.indexOf(playbackRate) + 1) % speeds.length;
     setPlaybackRate(speeds[nextIndex]);
   };
 
-  const toggleMute = () => setIsMuted(!isMuted);
-
   const onTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio) return;
-    const current = audio.currentTime;
-    const total = audio.duration || 1;
-    setCurrentTime(current);
-    setProgress((current / total) * 100);
+    setCurrentTime(audio.currentTime);
+    setProgress((audio.currentTime / (audio.duration || 1)) * 100);
   };
 
   const onLoadedMetadata = () => {
@@ -68,12 +61,8 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
     if (audio) setDuration(audio.duration);
   };
 
-  const onEnded = () => {
-    setIsPlaying(false);
-    setProgress(0);
-    setCurrentTime(0);
-  };
-
+  const onEnded = () => { setIsPlaying(false); setProgress(0); setCurrentTime(0); };
+  
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -84,88 +73,31 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
 
   const formatTime = (time: number) => {
     if (isNaN(time)) return "0:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    const min = Math.floor(time / 60);
+    const sec = Math.floor(time % 60);
+    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-xl min-w-[280px] sm:min-w-[320px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-white border border-slate-100'}`}>
-      <audio
-        ref={audioRef}
-        src={src}
-        onTimeUpdate={onTimeUpdate}
-        onLoadedMetadata={onLoadedMetadata}
-        onEnded={onEnded}
-        className="hidden"
-      />
-      
-      {/* Botón Play Grande */}
-      <button 
-        onClick={togglePlay}
-        className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
-      >
-        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[300px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
+      <audio ref={audioRef} src={src} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" />
+      <button onClick={togglePlay} className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-500 text-white hover:bg-slate-600'}`}>
+        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
       </button>
-
-      {/* Columna de Controles */}
-      <div className="flex-1 flex flex-col justify-center gap-1.5">
-        {/* Barra de Progreso (Ancha) */}
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={progress}
-          onChange={handleSeek}
-          className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-500 bg-slate-200'}`}
-        />
-
-        {/* Fila de Info: Tiempo | Velocidad | Volumen */}
-        <div className="flex justify-between items-center text-[11px] font-medium text-slate-500">
-            {/* Tiempo Dinámico */}
-            <span className="min-w-[35px]">
-                {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
-            </span>
-            
-            <div className="flex items-center gap-3">
-                {/* Botón Velocidad */}
-                <button 
-                    onClick={toggleSpeed}
-                    className="px-2 py-0.5 bg-black/5 hover:bg-black/10 rounded-full text-slate-600 transition"
-                >
-                    {playbackRate}x
-                </button>
-
-                {/* Volumen */}
-                <div 
-                    className="relative flex items-center group"
-                    onMouseEnter={() => setShowVolumeSlider(true)}
-                    onMouseLeave={() => setShowVolumeSlider(false)}
-                >
-                    <button onClick={toggleMute} className="hover:text-slate-800 transition">
-                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                    </button>
-                    
-                    {/* Slider Volumen Flotante */}
-                    <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 transition-all duration-200 z-10 ${showVolumeSlider ? 'opacity-100 visible scale-100' : 'opacity-0 invisible scale-95'}`}>
-                        <div className="h-20 w-6 flex items-center justify-center">
-                            <input 
-                                type="range" 
-                                min="0" 
-                                max="1" 
-                                step="0.1"
-                                value={isMuted ? 0 : volume}
-                                onChange={(e) => {
-                                    setVolume(parseFloat(e.target.value));
-                                    setIsMuted(parseFloat(e.target.value) === 0);
-                                }}
-                                className="-rotate-90 w-16 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                            />
-                        </div>
-                        {/* Flechita decorativa */}
-                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white rotate-45"></div>
-                    </div>
-                </div>
+      <div className="flex-1 flex flex-col justify-center mx-1">
+        <input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-600 bg-gray-300'}`} />
+      </div>
+      <div className="text-[10px] font-mono font-medium text-slate-600 w-[35px] text-right tabular-nums">
+        {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
+      </div>
+      <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/10 hover:bg-black/20 rounded text-[10px] font-bold text-slate-700 min-w-[28px] text-center transition">{playbackRate}x</button>
+      <div className="relative flex items-center" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}>
+        <button onClick={() => setIsMuted(!isMuted)} className="p-1 text-slate-500 hover:text-slate-700 transition">
+            {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-lg rounded-lg p-2 transition-all duration-200 ${showVolumeSlider ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+            <div className="h-24 w-6 flex items-center justify-center">
+                <input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
             </div>
         </div>
       </div>
@@ -183,7 +115,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
-
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -204,10 +135,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     setMessages([]);
     setShowEmojiPicker(false);
     setIsRecording(false);
-    
-    if (socket && contact.phone) {
-        socket.emit('request_conversation', contact.phone);
-    }
+    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
 
   useEffect(() => {
@@ -217,14 +145,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             setMessages((prev) => [...prev, msg]);
         }
     };
-    
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        return () => { 
-          socket.off('conversation_history', handleHistory);
-          socket.off('message', handleNewMessage);
-        };
+        return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); };
     }
   }, [socket, contact.phone]);
 
@@ -232,11 +156,8 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     e.preventDefault();
     if (input.trim()) {
       const msg = { 
-          text: input, 
-          sender: user.username, 
-          targetPhone: contact.phone,
-          timestamp: new Date().toISOString(), 
-          type: 'text'
+          text: input, sender: user.username, targetPhone: contact.phone,
+          timestamp: new Date().toISOString(), type: 'text'
       };
       socket.emit('chatMessage', msg);
       setInput('');
@@ -244,22 +165,15 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
-  // --- AUDIO ---
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
         let mimeType = 'audio/webm';
         if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
-
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) audioChunksRef.current.push(event.data);
-        };
-
+        mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
         mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
             const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
@@ -267,12 +181,9 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             await uploadFile(audioFile);
             stream.getTracks().forEach(track => track.stop());
         };
-
         mediaRecorder.start();
         setIsRecording(true);
-    } catch (error: any) {
-        alert(`Error micrófono: ${error.message}`);
-    }
+    } catch (error: any) { alert(`Error micrófono: ${error.message}`); }
   };
 
   const stopRecording = () => {
@@ -288,50 +199,33 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         formData.append('file', file);
         formData.append('targetPhone', contact.phone);
         formData.append('senderName', user.username);
-
         try {
-            const response = await fetch(`${API_URL}/api/upload`, {
-                method: 'POST',
-                body: formData
-            });
-            if (!response.ok) throw new Error('Error subiendo archivo');
-        } catch (error) {
-            console.error(error);
-            alert("Error al enviar el archivo.");
-        } finally {
-            setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
+            await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
+        } catch (error) { alert("Error envio"); } 
+        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
   };
 
-  const onEmojiClick = (emojiData: EmojiClickData) => {
-    setInput((prev) => prev + emojiData.emoji);
-  };
+  const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
       const updates: any = {}; updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
-
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
-      
-      {/* LIGHTBOX */}
       {selectedImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}>
             <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button>
             <img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
-
-      {/* BARRA SUPERIOR CRM */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -350,8 +244,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             </select>
         </div>
       </div>
-
-      {/* ÁREA DE MENSAJES */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -359,7 +251,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <p className="text-sm">Historial cargado.</p>
           </div>
         )}
-        
         {messages.map((m, i) => {
           const isMe = m.sender !== contact.phone; 
           return (
@@ -370,9 +261,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         {m.sender === 'Agente' ? 'Yo' : m.sender}
                     </span>
                 )}
-
                 <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
-                    
                     {m.type === 'image' && m.mediaId ? (
                         <div className="mb-1 group relative">
                             <img 
@@ -404,35 +293,21 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         })}
         <div ref={messagesEndRef} />
       </div>
-
-      {/* EMOJI PICKER */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
         </div>
       )}
-
-      {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-          
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar archivo">
-            <Paperclip className="w-5 h-5" />
-          </button>
-          
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
           <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
-          
-          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-            <Smile className="w-5 h-5" />
-          </button>
-
+          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
           {input.trim() ? (
               <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button>
           ) : (
-              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">
-                {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}
-              </button>
+              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">{isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}</button>
           )}
         </form>
       </div>
