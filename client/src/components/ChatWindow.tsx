@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -17,34 +17,97 @@ interface Message {
   mediaId?: string;
 }
 
-// Componente de Audio para evitar problemas de carga
-const AudioPlayer = ({ src }: { src: string }) => {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+// --- COMPONENTE DE AUDIO PERSONALIZADO (DISEÑO PRO) ---
+const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    setLoading(true);
-    fetch(src)
-      .then(response => response.blob())
-      .then(blob => {
-        if (isMounted) {
-          const url = URL.createObjectURL(blob);
-          setAudioUrl(url);
-          setLoading(false);
-        }
-      })
-      .catch(err => {
-        console.error("Error audio:", err);
-        setLoading(false);
-      });
-    return () => { isMounted = false; };
-  }, [src]);
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
 
-  if (loading) return <div className="text-xs text-slate-400 italic px-2">Cargando...</div>;
-  if (!audioUrl) return <div className="text-xs text-red-400 px-2">Error</div>;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
 
-  return <audio controls src={audioUrl} className="h-8 w-full max-w-[240px]" />;
+  const onTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const current = audio.currentTime;
+    const total = audio.duration;
+    setCurrentTime(current);
+    setProgress((current / total) * 100);
+  };
+
+  const onLoadedMetadata = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setDuration(audio.duration);
+  };
+
+  const onEnded = () => {
+    setIsPlaying(false);
+    setProgress(0);
+    setCurrentTime(0);
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const newTime = (Number(e.target.value) / 100) * duration;
+    audio.currentTime = newTime;
+    setProgress(Number(e.target.value));
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  };
+
+  return (
+    <div className={`flex items-center gap-3 p-2 rounded-xl min-w-[280px] ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={onTimeUpdate}
+        onLoadedMetadata={onLoadedMetadata}
+        onEnded={onEnded}
+        className="hidden"
+      />
+      
+      <button 
+        onClick={togglePlay}
+        className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-500 text-white hover:bg-slate-600'}`}
+      >
+        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+      </button>
+
+      <div className="flex-1 flex flex-col justify-center">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={progress}
+          onChange={handleSeek}
+          className="w-full h-1.5 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-slate-600"
+        />
+      </div>
+
+      <div className="text-xs font-mono font-medium text-slate-600 min-w-[35px] text-right">
+        {/* Si no ha empezado (0s), muestra duración total. Si ya empezó, muestra tiempo actual */}
+        {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
+      </div>
+    </div>
+  );
 };
 
 export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
@@ -117,10 +180,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        let mimeType = 'audio/webm';
-        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
-
-        const mediaRecorder = new MediaRecorder(stream, { mimeType });
+        const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
@@ -129,9 +189,8 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         };
 
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-            const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
-            const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            const audioFile = new File([audioBlob], "voice_note.webm", { type: 'audio/webm' });
             await uploadFile(audioFile);
             stream.getTracks().forEach(track => track.stop());
         };
@@ -139,7 +198,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         mediaRecorder.start();
         setIsRecording(true);
     } catch (error: any) {
-        alert(`Error micrófono: ${error.message}. Revisa permisos.`);
+        alert(`Error micrófono: ${error.message}`);
     }
   };
 
@@ -193,7 +252,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       )}
 
-      {/* BARRA SUPERIOR */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -213,7 +271,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* CHAT */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -237,12 +294,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                     
                     {m.type === 'image' && m.mediaId ? (
                         <div className="mb-1 group relative">
-                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
+                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
-                        <div className="flex items-center gap-2 min-w-[240px]">
-                            <AudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} />
-                        </div>
+                        // USAMOS EL REPRODUCTOR PERSONALIZADO
+                        <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                     ) : m.type === 'document' && m.mediaId ? (
                         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
                             <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
@@ -264,14 +320,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* EMOJIS */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
         </div>
       )}
 
-      {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
@@ -282,16 +336,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
           
           <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
-          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-            <Smile className="w-5 h-5" />
-          </button>
+          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
 
           {input.trim() ? (
               <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button>
           ) : (
-              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">
-                {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}
-              </button>
+              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">{isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}</button>
           )}
         </form>
       </div>
