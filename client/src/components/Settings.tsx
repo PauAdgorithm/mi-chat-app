@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, LayoutList } from 'lucide-react';
+import { User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, LayoutList, RefreshCw } from 'lucide-react';
 
 interface SettingsProps {
   onBack: () => void;
@@ -15,7 +15,7 @@ interface Agent {
 interface ConfigItem {
     id: string;
     name: string;
-    type: string;
+    type: string; // "Department" o "Status"
 }
 
 export function Settings({ onBack, socket }: SettingsProps) {
@@ -23,14 +23,15 @@ export function Settings({ onBack, socket }: SettingsProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
   
-  // Forms
+  // Forms Agentes
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState('Ventas');
   const [newPassword, setNewPassword] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   
-  const [newConfigName, setNewConfigName] = useState('');
-  const [newConfigType, setNewConfigType] = useState('Department');
+  // Forms Configuración (SEPARADOS para evitar efecto espejo)
+  const [newDept, setNewDept] = useState('');
+  const [newStatus, setNewStatus] = useState('');
 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -41,15 +42,17 @@ export function Settings({ onBack, socket }: SettingsProps) {
         socket.emit('request_config');
 
         socket.on('agents_list', (list: Agent[]) => setAgents(list));
-        socket.on('config_list', (list: ConfigItem[]) => setConfigList(list));
+        socket.on('config_list', (list: ConfigItem[]) => {
+            console.log("Config recibida:", list); // Debug para ver si llegan
+            setConfigList(list);
+        });
         
         socket.on('action_error', (msg: string) => setError(msg));
         socket.on('action_success', (msg: string) => {
             setSuccess(msg);
-            setNewName('');
-            setNewPassword('');
-            setAdminPassword('');
-            setNewConfigName('');
+            // Limpiar todos los formularios
+            setNewName(''); setNewPassword(''); setAdminPassword('');
+            setNewDept(''); setNewStatus('');
             setTimeout(() => setSuccess(''), 3000);
         });
     }
@@ -75,11 +78,19 @@ export function Settings({ onBack, socket }: SettingsProps) {
       socket.emit('delete_agent', { agentId: id, adminPassword });
   };
 
-  const handleAddConfig = (e: React.FormEvent) => {
+  // Añadir Departamento
+  const handleAddDept = (e: React.FormEvent) => {
       e.preventDefault();
-      if (newConfigName.trim()) {
-          socket.emit('add_config', { name: newConfigName, type: newConfigType });
-          setNewConfigName('');
+      if (newDept.trim()) {
+          socket.emit('add_config', { name: newDept, type: 'Department' });
+      }
+  };
+
+  // Añadir Estado
+  const handleAddStatus = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (newStatus.trim()) {
+          socket.emit('add_config', { name: newStatus, type: 'Status' });
       }
   };
 
@@ -87,6 +98,7 @@ export function Settings({ onBack, socket }: SettingsProps) {
       socket.emit('delete_config', id);
   };
 
+  // Filtramos la lista general para pintarla en dos columnas
   const departments = configList.filter(c => c.type === 'Department');
   const statuses = configList.filter(c => c.type === 'Status');
 
@@ -141,7 +153,7 @@ export function Settings({ onBack, socket }: SettingsProps) {
                                           </div>
                                       </div>
                                       {agents.length > 1 && (
-                                          <button onClick={() => handleDeleteAgent(agent.id)} className="text-slate-300 hover:text-red-500 transition"><Trash2 className="w-4 h-4" /></button>
+                                          <button onClick={() => handleDeleteAgent(agent.id)} className="text-slate-300 hover:text-red-500 transition p-2"><Trash2 className="w-4 h-4" /></button>
                                       )}
                                   </div>
                               ))}
@@ -178,37 +190,59 @@ export function Settings({ onBack, socket }: SettingsProps) {
               {activeTab === 'config' && (
                   <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
                       
-                      {/* Departamentos */}
+                      {/* COLUMNA DEPARTAMENTOS */}
                       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                           <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Briefcase className="w-5 h-5 text-purple-500"/> Departamentos</h2>
-                          <div className="space-y-2 mb-4">
+                          
+                          {/* Lista existente */}
+                          <div className="space-y-2 mb-4 max-h-[300px] overflow-y-auto">
+                              {departments.length === 0 && <p className="text-sm text-slate-400 italic">No hay departamentos.</p>}
                               {departments.map(d => (
-                                  <div key={d.id} className="flex justify-between items-center p-2 bg-purple-50 rounded border border-purple-100 text-purple-700 text-sm font-medium">
+                                  <div key={d.id} className="flex justify-between items-center p-3 bg-purple-50 rounded-lg border border-purple-100 text-purple-700 text-sm font-medium group">
                                       {d.name}
-                                      <button onClick={() => handleDeleteConfig(d.id)} className="text-purple-300 hover:text-purple-700"><XIcon /></button>
+                                      <button onClick={() => handleDeleteConfig(d.id)} className="text-purple-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                               ))}
                           </div>
-                          <form onSubmit={handleAddConfig} className="flex gap-2">
-                              <input value={newConfigName} onChange={e => { setNewConfigName(e.target.value); setNewConfigType('Department'); }} placeholder="Nuevo Dpto..." className="flex-1 p-2 border rounded text-sm" required={newConfigType === 'Department'} />
-                              <button type="submit" onClick={() => setNewConfigType('Department')} className="bg-purple-600 text-white p-2 rounded"><Plus className="w-4 h-4" /></button>
+                          
+                          {/* Input Nuevo */}
+                          <form onSubmit={handleAddDept} className="flex gap-2">
+                              <input 
+                                value={newDept} 
+                                onChange={e => setNewDept(e.target.value)} 
+                                placeholder="Añadir Dpto..." 
+                                className="flex-1 p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-500" 
+                                required 
+                              />
+                              <button type="submit" className="bg-purple-600 text-white p-2 rounded-lg hover:bg-purple-700"><Plus className="w-4 h-4" /></button>
                           </form>
                       </div>
 
-                      {/* Estados */}
+                      {/* COLUMNA ESTADOS */}
                       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                           <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-500"/> Estados</h2>
-                          <div className="space-y-2 mb-4">
+                          
+                          {/* Lista existente */}
+                          <div className="space-y-2 mb-4 max-h-[300px] overflow-y-auto">
+                              {statuses.length === 0 && <p className="text-sm text-slate-400 italic">No hay estados.</p>}
                               {statuses.map(s => (
-                                  <div key={s.id} className="flex justify-between items-center p-2 bg-green-50 rounded border border-green-100 text-green-700 text-sm font-medium">
+                                  <div key={s.id} className="flex justify-between items-center p-3 bg-green-50 rounded-lg border border-green-100 text-green-700 text-sm font-medium group">
                                       {s.name}
-                                      <button onClick={() => handleDeleteConfig(s.id)} className="text-green-300 hover:text-green-700"><XIcon /></button>
+                                      <button onClick={() => handleDeleteConfig(s.id)} className="text-green-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                                   </div>
                               ))}
                           </div>
-                          <form onSubmit={handleAddConfig} className="flex gap-2">
-                              <input value={newConfigName} onChange={e => { setNewConfigName(e.target.value); setNewConfigType('Status'); }} placeholder="Nuevo Estado..." className="flex-1 p-2 border rounded text-sm" required={newConfigType === 'Status'} />
-                              <button type="submit" onClick={() => setNewConfigType('Status')} className="bg-green-600 text-white p-2 rounded"><Plus className="w-4 h-4" /></button>
+
+                          {/* Input Nuevo */}
+                          <form onSubmit={handleAddStatus} className="flex gap-2">
+                              <input 
+                                value={newStatus} 
+                                onChange={e => setNewStatus(e.target.value)} 
+                                placeholder="Añadir Estado..." 
+                                className="flex-1 p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-green-500" 
+                                required 
+                              />
+                              <button type="submit" className="bg-green-600 text-white p-2 rounded-lg hover:bg-green-700"><Plus className="w-4 h-4" /></button>
                           </form>
                       </div>
 
@@ -219,5 +253,3 @@ export function Settings({ onBack, socket }: SettingsProps) {
     </div>
   );
 }
-
-const XIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>;
