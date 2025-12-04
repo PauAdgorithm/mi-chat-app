@@ -24,6 +24,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
+  // Estados para el CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -88,6 +89,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
+  // --- AUDIO ---
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -109,8 +111,8 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         mediaRecorder.start();
         setIsRecording(true);
     } catch (error) {
-        console.error("Error micrófono:", error);
-        alert("No se pudo acceder al micrófono. Verifica los permisos.");
+        console.error("Error microfono:", error);
+        alert("No se pudo acceder al micrófono.");
     }
   };
 
@@ -121,6 +123,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       }
   };
 
+  // --- SUBIDA ARCHIVOS ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
@@ -153,7 +156,8 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
-      const updates: any = {}; updates[field] = value;
+      const updates: any = {};
+      updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
 
@@ -205,12 +209,13 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                 
+                {/* LÓGICA DE VISUALIZACIÓN */}
                 {m.type === 'image' && m.mediaId ? (
                     <div className="mb-1 group relative">
                         <img 
                             src={`${API_URL}/api/media/${m.mediaId}`} 
                             alt="Imagen" 
-                            className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5"
+                            className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90 transition bg-black/5"
                             onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }}
                         />
                     </div>
@@ -219,6 +224,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         <audio controls src={`${API_URL}/api/media/${m.mediaId}`} className="h-8 w-full" />
                     </div>
                 ) : m.type === 'document' && m.mediaId ? (
+                    // 📄 VISUALIZACIÓN DE DOCUMENTO
                     <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
                         <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
                         <div className="flex-1 min-w-0">
