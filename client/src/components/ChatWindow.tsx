@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -17,17 +17,14 @@ interface Message {
   mediaId?: string;
 }
 
-// --- COMPONENTE REPRODUCTOR DE AUDIO INTELIGENTE ---
-// Descarga el audio como Blob para que la barra de progreso funcione perfecta
+// Componente de Audio para evitar problemas de carga
 const AudioPlayer = ({ src }: { src: string }) => {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Cargar el audio completo al montar
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    
     fetch(src)
       .then(response => response.blob())
       .then(blob => {
@@ -38,19 +35,16 @@ const AudioPlayer = ({ src }: { src: string }) => {
         }
       })
       .catch(err => {
-        console.error("Error cargando audio:", err);
+        console.error("Error audio:", err);
         setLoading(false);
       });
-
     return () => { isMounted = false; };
   }, [src]);
 
-  if (loading) return <div className="text-xs text-slate-400 italic px-2">Cargando audio...</div>;
-  if (!audioUrl) return <div className="text-xs text-red-400 px-2">Error audio</div>;
+  if (loading) return <div className="text-xs text-slate-400 italic px-2">Cargando...</div>;
+  if (!audioUrl) return <div className="text-xs text-red-400 px-2">Error</div>;
 
-  return (
-    <audio controls src={audioUrl} className="h-8 w-full max-w-[240px]" />
-  );
+  return <audio controls src={audioUrl} className="h-8 w-full max-w-[240px]" />;
 };
 
 export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
@@ -63,7 +57,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
-
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -121,16 +114,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
-  // --- GRABACIÓN DE AUDIO MEJORADA ---
   const startRecording = async () => {
     try {
-        // 1. Solicitar permisos explícitos
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        // 2. Detectar tipo soportado (algunos navegadores prefieren mp4 o webm)
         let mimeType = 'audio/webm';
         if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
-        
+
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
@@ -140,31 +129,17 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         };
 
         mediaRecorder.onstop = async () => {
-            // Crear Blob final
             const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
             const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
             const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
-            
             await uploadFile(audioFile);
-            
-            // Apagar tracks (liberar micrófono)
             stream.getTracks().forEach(track => track.stop());
         };
 
         mediaRecorder.start();
         setIsRecording(true);
     } catch (error: any) {
-        console.error("Error micrófono:", error);
-        
-        // Mensajes de error amigables para el usuario
-        let msg = "Error desconocido al acceder al micrófono.";
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-            msg = "⚠️ Permiso denegado. Por favor, permite el acceso al micrófono en la barra de direcciones (candado) o en la configuración de Windows.";
-        } else if (error.name === 'NotFoundError') {
-            msg = "⚠️ No se ha encontrado ningún micrófono conectado.";
-        }
-        
-        alert(msg);
+        alert(`Error micrófono: ${error.message}. Revisa permisos.`);
     }
   };
 
@@ -183,14 +158,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         formData.append('senderName', user.username);
 
         try {
-            const response = await fetch(`${API_URL}/api/upload`, {
-                method: 'POST',
-                body: formData
-            });
-            if (!response.ok) throw new Error('Error subiendo archivo');
+            const response = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
+            if (!response.ok) throw new Error('Error upload');
         } catch (error) {
             console.error(error);
-            alert("Error al enviar el archivo.");
+            alert("Error al enviar archivo.");
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -214,7 +186,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
       
-      {/* LIGHTBOX */}
       {selectedImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}>
             <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button>
@@ -255,7 +226,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
           const isMe = m.sender !== contact.phone; 
           return (
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-               {/* COLUMNA DEL MENSAJE CON NOMBRE */}
                <div className={`flex flex-col max-w-[75%]`}>
                 {isMe && (
                     <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">
@@ -267,11 +237,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                     
                     {m.type === 'image' && m.mediaId ? (
                         <div className="mb-1 group relative">
-                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
+                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
                         <div className="flex items-center gap-2 min-w-[240px]">
-                            {/* USAMOS EL REPRODUCTOR INTELIGENTE AQUÍ 👇 */}
                             <AudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} />
                         </div>
                     ) : m.type === 'document' && m.mediaId ? (
@@ -286,7 +255,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                     ) : (
                         <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
                     )}
-
                     <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
                 </div>
               </div>
@@ -312,14 +280,18 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <Paperclip className="w-5 h-5" />
           </button>
           
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none text-sm transition-all ${isRecording ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' : 'bg-slate-50 border-slate-200 focus:border-blue-300'}`} />
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
-          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
+          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+            <Smile className="w-5 h-5" />
+          </button>
 
           {input.trim() ? (
               <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button>
           ) : (
-              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">{isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}</button>
+              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">
+                {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}
+              </button>
           )}
         </form>
       </div>
