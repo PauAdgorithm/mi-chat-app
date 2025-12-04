@@ -7,7 +7,7 @@ interface ChatWindowProps {
   socket: any;
   user: { username: string };
   contact: Contact;
-  // NUEVO: Recibimos la configuración dinámica
+  // RECUPERADO: La configuración dinámica
   config?: { 
       departments: string[]; 
       statuses: string[]; 
@@ -22,7 +22,7 @@ interface Message {
   mediaId?: string;
 }
 
-// --- REPRODUCTOR DE AUDIO PRO (Sin cambios) ---
+// --- REPRODUCTOR DE AUDIO PRO ---
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -100,22 +100,22 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   if (!isReady) return <div className="text-xs text-slate-400 p-2 italic">Cargando...</div>;
 
   return (
-    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[320px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
+    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}>
       <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" />
       
-      <button onClick={togglePlay} className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-500 text-white hover:bg-slate-600'}`}>
+      <button onClick={togglePlay} className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}>
         {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
       </button>
 
       <div className="flex-1 flex flex-col justify-center mx-1">
-        <input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-600 bg-gray-300'}`} />
+        <input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-600 bg-gray-300'}`} />
       </div>
 
       <div className="text-[10px] font-mono font-medium text-slate-600 w-[35px] text-right tabular-nums">
         {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
       </div>
 
-      <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/10 hover:bg-black/20 rounded text-[10px] font-bold text-slate-700 min-w-[28px] text-center transition" title="Velocidad">{playbackRate}x</button>
+      <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/10 hover:bg-black/20 rounded text-[10px] font-bold text-slate-700 min-w-[28px] text-center transition">{playbackRate}x</button>
 
       <div className="relative flex items-center group" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}>
         <button onClick={toggleMute} className="p-1 text-slate-500 hover:text-slate-700 transition">
@@ -127,14 +127,11 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
             </div>
         </div>
       </div>
-
-      <a href={src} download="audio.webm" target="_blank" rel="noopener noreferrer" className="p-1 text-slate-500 hover:text-slate-800 hover:bg-black/5 rounded-full transition" title="Descargar">
-        <Download className="w-4 h-4" />
-      </a>
     </div>
   );
 };
 
+// --- COMPONENTE PRINCIPAL ---
 export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -142,7 +139,6 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
-  // Estados CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -159,6 +155,7 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   useEffect(() => scrollToBottom(), [messages]);
 
+  // Cargar datos al cambiar de contacto
   useEffect(() => {
     setName(contact.name || '');
     setDepartment(contact.department || '');
@@ -166,44 +163,32 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
     setMessages([]);
     setShowEmojiPicker(false);
     setIsRecording(false);
-    
-    if (socket && contact.phone) {
-        socket.emit('request_conversation', contact.phone);
-    }
+    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
 
   useEffect(() => {
     const handleHistory = (history: Message[]) => setMessages(history);
     const handleNewMessage = (msg: any) => {
-        if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
-            setMessages((prev) => [...prev, msg]);
-        }
+        if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) setMessages((prev) => [...prev, msg]);
     };
-    
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        return () => { 
-          socket.off('conversation_history', handleHistory);
-          socket.off('message', handleNewMessage);
-        };
+        return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); };
     }
   }, [socket, contact.phone]);
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim()) {
-      const msg = { 
-          text: input, sender: user.username, targetPhone: contact.phone,
-          timestamp: new Date().toISOString(), type: 'text'
-      };
+      const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: 'text' };
       socket.emit('chatMessage', msg);
       setInput('');
       setShowEmojiPicker(false);
     }
   };
 
-  // --- AUDIO & UPLOAD ---
+  // --- GRABACIÓN ---
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -212,13 +197,13 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
-        mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
             const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
-            const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
+            const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType });
             await uploadFile(audioFile);
-            stream.getTracks().forEach(track => track.stop());
+            stream.getTracks().forEach(t => t.stop());
         };
         mediaRecorder.start();
         setIsRecording(true);
@@ -227,6 +212,7 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
 
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
 
+  // --- UPLOAD ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
@@ -235,26 +221,24 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
         formData.append('senderName', user.username);
         try {
             await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
-        } catch (error) { alert("Error envío archivo."); } 
-        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+        } catch (e) { alert("Error envío"); } 
+        finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; }
   };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
-  };
-
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
-
+  
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
       const updates: any = {}; updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
-
+  
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
+      
+      {/* LIGHTBOX */}
       {selectedImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}>
             <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button>
@@ -262,14 +246,14 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
         </div>
       )}
 
-      {/* BARRA SUPERIOR (CRM) */}
+      {/* BARRA SUPERIOR (DINÁMICA CON CONFIG) */}
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[140px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
             <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
         </div>
 
-        {/* SELECTOR DEPARTAMENTO (COLOR MORADO + DINÁMICO) */}
+        {/* Selector Dpto (Dinámico) */}
         <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200">
             <Briefcase className="w-4 h-4 text-purple-600" />
             <select 
@@ -278,19 +262,11 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
                 onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}
             >
                 <option value="">Sin Dpto</option>
-                {config?.departments?.map(dept => (
-                    <option key={dept} value={dept}>{dept}</option>
-                )) || (
-                    <>
-                        <option value="Ventas">Ventas</option>
-                        <option value="Taller">Taller</option>
-                        <option value="Admin">Admin</option>
-                    </>
-                )}
+                {config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}
             </select>
         </div>
 
-        {/* SELECTOR ESTADO (DINÁMICO) */}
+        {/* Selector Estado (Dinámico) */}
         <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
             <CheckCircle className="w-4 h-4 text-slate-400" />
             <select 
@@ -298,20 +274,11 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
                 value={status} 
                 onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}
             >
-                {config?.statuses?.map(stat => (
-                    <option key={stat} value={stat}>{stat}</option>
-                )) || (
-                    <>
-                        <option value="Nuevo">Nuevo</option>
-                        <option value="Abierto">Abierto</option>
-                        <option value="Cerrado">Cerrado</option>
-                    </>
-                )}
+                {config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}
             </select>
         </div>
       </div>
 
-      {/* CHAT */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -323,7 +290,7 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
           const isMe = m.sender !== contact.phone; 
           return (
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex flex-col max-w-[75%]`}>
+               <div className={`flex flex-col max-w-[75%]`}>
                 {isMe && (
                     <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">
                         {m.sender === 'Agente' ? 'Yo' : m.sender}
@@ -339,10 +306,7 @@ export function ChatWindow({ socket, user, contact, config }: ChatWindowProps) {
                     ) : m.type === 'document' && m.mediaId ? (
                         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
                             <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
-                            <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-slate-700 truncate">{m.text}</p>
-                                <p className="text-xs text-slate-400">Documento</p>
-                            </div>
+                            <div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate">{m.text}</p><p className="text-xs text-slate-400">Documento</p></div>
                             <a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-5 h-5" /></a>
                         </div>
                     ) : (
