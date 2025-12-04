@@ -8,9 +8,6 @@ import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
 
-// LOG DE INICIO
-console.log("🚀 [BOOT] Servidor iniciando...");
-
 dotenv.config();
 
 const app = express();
@@ -32,7 +29,7 @@ if (airtableApiKey && airtableBaseId) {
   try {
     Airtable.configure({ apiKey: airtableApiKey });
     base = Airtable.base(airtableBaseId);
-    console.log("✅ Airtable conectado");
+    console.log("✅ Airtable configurado");
   } catch (e) { console.error("Error Airtable config:", e); }
 }
 
@@ -41,9 +38,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- RUTAS API ---
-app.get('/', (req, res) => { res.status(200).send('🟢 Chatgorithm Backend Online'); });
-
+// --- RUTA: TUNEL MEDIA ---
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
@@ -57,13 +52,14 @@ app.get('/api/media/:id', async (req, res) => {
     } catch (e) { res.sendStatus(404); }
 });
 
+// --- SUBIDA ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
-    let targetPhone = req.body.targetPhone;
+    const targetPhone = req.body.targetPhone;
     const senderName = req.body.senderName || "Agente";
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
-    targetPhone = cleanNumber(targetPhone);
+    const cleanTarget = cleanNumber(targetPhone);
 
     const mime = file.mimetype;
     let msgType = 'document'; 
@@ -77,7 +73,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } });
     const mediaId = uploadRes.data.id;
 
-    const payload: any = { messaging_product: "whatsapp", to: targetPhone, type: msgType };
+    const payload: any = { messaging_product: "whatsapp", to: cleanTarget, type: msgType };
     if (msgType === 'image') payload.image = { id: mediaId };
     else if (msgType === 'audio') payload.audio = { id: mediaId };
     else payload.document = { id: mediaId, filename: file.originalname };
@@ -90,12 +86,15 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; }
     else if (mime.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; }
 
-    await saveAndEmitMessage({ text: textLog, sender: senderName, recipient: targetPhone, timestamp: new Date().toISOString(), type: saveType, mediaId: mediaId });
-    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
+    await saveAndEmitMessage({ text: textLog, sender: senderName, recipient: cleanTarget, timestamp: new Date().toISOString(), type: saveType, mediaId: mediaId });
+    
+    // CORRECCIÓN: Quitamos el "Tú" y dejamos solo "Nombre: Mensaje"
+    await handleContactUpdate(cleanTarget, `${senderName}: 📎 Archivo`);
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: "Error upload" }); }
+  } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); }
 });
 
+// --- WEBHOOK ---
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']);
   else res.sendStatus(403);
@@ -230,32 +229,17 @@ io.on('connection', (socket) => {
       } catch (e) { console.error(e); }
   });
 
-  // --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE: SANITIZACIÓN DE CONTACTOS ---
   socket.on('request_contacts', async () => {
     if (base) {
       try {
         const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all();
         socket.emit('contacts_update', records.map(r => {
             const avatarField = r.get('avatar') as any[];
-            
-            // 🛡️ LÓGICA ANTI-OBJECT OBJECT
             let rawMsg = r.get('last_message');
             let cleanMsg = "";
-
-            if (rawMsg) {
-                // Si es un objeto (como pasa a veces con Lookups o formatos raros), lo forzamos a string legible o placeholder
-                if (typeof rawMsg === 'object') {
-                     // Si es un array, cogemos el primero
-                     if (Array.isArray(rawMsg) && rawMsg.length > 0) {
-                        cleanMsg = String(rawMsg[0]);
-                     } else {
-                        // Si es un objeto puro, ponemos un texto genérico para evitar [object Object]
-                        cleanMsg = "Mensaje";
-                     }
-                } else {
-                     cleanMsg = String(rawMsg);
-                }
-            }
+            if (typeof rawMsg === 'string') cleanMsg = rawMsg;
+            else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]);
+            else if (rawMsg) cleanMsg = String(rawMsg);
 
             return {
               id: r.id,
@@ -264,7 +248,7 @@ io.on('connection', (socket) => {
               status: (r.get('status') as string) || "Nuevo",
               department: (r.get('department') as string) || "",
               assigned_to: (r.get('assigned_to') as string) || "",
-              last_message: cleanMsg, // <--- USAMOS EL MENSAJE LIMPIO
+              last_message: cleanMsg,
               last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(),
               avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null
             };
@@ -311,7 +295,9 @@ io.on('connection', (socket) => {
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
          await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() });
-         await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`);
+         
+         // CORRECCIÓN: Quitamos el "Tú"
+         await handleContactUpdate(targetPhone, `${msg.sender}: ${msg.text}`);
        } catch (error: any) { console.error("Error envío:", error.message); }
     }
   });
