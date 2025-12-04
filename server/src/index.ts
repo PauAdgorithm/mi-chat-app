@@ -38,29 +38,43 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- RUTA: TUNEL MEDIA ---
+// --- RUTA: TUNEL MEDIA (CORREGIDA PARA BARRA DE PROGRESO) ---
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
     try {
+        // 1. Obtener URL real
         const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${id}`, {
             headers: { 'Authorization': `Bearer ${waToken}` }
         });
+        
+        // 2. Descargar con STREAM
         const mediaRes = await axios.get(urlRes.data.url, {
-            headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream'
+            headers: { 'Authorization': `Bearer ${waToken}` }, 
+            responseType: 'stream'
         });
+
+        // 3. ¡IMPORTANTE! Reenviar el tamaño del archivo (Content-Length)
+        if (mediaRes.headers['content-length']) {
+            res.setHeader('Content-Length', mediaRes.headers['content-length']);
+        }
         res.setHeader('Content-Type', mediaRes.headers['content-type']);
+        
+        // Permitir rangos (útil para que el navegador pueda saltar adelante/atrás)
+        res.setHeader('Accept-Ranges', 'bytes');
+
         mediaRes.data.pipe(res);
-    } catch (e) { res.sendStatus(404); }
+    } catch (e) { 
+        console.error("Error media:", e);
+        res.sendStatus(404); 
+    }
 });
 
-// --- SUBIR ARCHIVOS ---
+// --- RUTA: SUBIR ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
     const targetPhone = req.body.targetPhone;
-    const senderName = req.body.senderName || "Agente"; // Recibimos el nombre del frontend
-
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
     const mime = file.mimetype;
@@ -77,9 +91,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     });
     const mediaId = uploadRes.data.id;
 
-    const messagePayload: any = {
-        messaging_product: "whatsapp", to: targetPhone, type: msgType
-    };
+    const messagePayload: any = { messaging_product: "whatsapp", to: targetPhone, type: msgType };
     if (msgType === 'image') messagePayload.image = { id: mediaId };
     else if (msgType === 'audio') messagePayload.audio = { id: mediaId };
     else messagePayload.document = { id: mediaId, filename: file.originalname };
@@ -92,17 +104,12 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     if (msgType === 'image') textLog = "📷 [Imagen]";
     else if (msgType === 'audio') textLog = "🎤 [Audio]";
 
-    // GUARDAMOS CON NOMBRE CORRECTO
     await saveAndEmitMessage({
-        text: textLog, 
-        sender: senderName, // <--- USAMOS EL NOMBRE REAL AQUÍ
-        recipient: targetPhone,
-        timestamp: new Date().toISOString(),
-        type: msgType,
-        mediaId: mediaId
+        text: textLog, sender: "Agente", recipient: targetPhone,
+        timestamp: new Date().toISOString(), type: msgType, mediaId: mediaId
     });
     
-    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
+    await handleContactUpdate(targetPhone, `Tú: 📎 Archivo`);
     res.json({ success: true });
 
   } catch (error: any) { 
@@ -132,8 +139,8 @@ app.post('/webhook', async (req, res) => {
         let mediaId = "";
 
         if (type === 'text') text = msgData.text.body;
-        else if (type === 'image') { text = msgData.image.caption || "📷 Imagen"; mediaId = msgData.image.id; }
-        else if (type === 'audio' || type === 'voice') { text = "🎤 Audio"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; }
+        else if (type === 'image') { text = msgData.image.caption || "📷 Imagen recibida"; mediaId = msgData.image.id; }
+        else if (type === 'audio' || type === 'voice') { text = "🎤 Audio recibido"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; }
         else if (type === 'document') { text = msgData.document.filename || "📄 Documento"; mediaId = msgData.document.id; }
         else if (type === 'sticker') text = "👾 Sticker";
         
@@ -142,7 +149,7 @@ app.post('/webhook', async (req, res) => {
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
     res.sendStatus(200);
-  } catch (e) { console.error(e); res.sendStatus(500); }
+  } catch (e) { res.sendStatus(500); }
 });
 
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
@@ -219,15 +226,12 @@ io.on('connection', (socket) => {
            { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         
-         // ✅ CORRECCIÓN CLAVE: Usamos msg.sender SIN COMILLAS (es la variable)
          await saveAndEmitMessage({ 
              text: msg.text, 
-             sender: msg.sender,  // <--- AQUÍ ESTABA EL FALLO
+             sender: msg.sender, 
              recipient: targetPhone, 
              timestamp: new Date().toISOString() 
          });
-         
          await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`);
        } catch (error: any) { console.error("Error envío:", error.message); }
     }
