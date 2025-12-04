@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Users, Search, RefreshCw } from 'lucide-react';
 
-// 👇 AQUÍ ESTABA EL ERROR: Faltaba "export" delante de interface
 export interface Contact {
   id: string;
   phone: string;
@@ -10,6 +9,7 @@ export interface Contact {
   department?: string;
   last_message?: string;
   last_message_time?: string;
+  avatar?: string;
 }
 
 interface SidebarProps {
@@ -26,31 +26,30 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
     if (!socket) return;
 
     socket.on('contacts_update', (newContacts: any) => {
+      // Protección: Aseguramos que sea un array para evitar crash
       if (Array.isArray(newContacts)) {
         setContacts(newContacts);
       }
     });
 
     socket.emit('request_contacts');
-    
-    socket.on('contact_updated_notification', () => {
-        socket.emit('request_contacts');
-    });
-
     const interval = setInterval(() => socket.emit('request_contacts'), 5000);
 
     return () => {
       socket.off('contacts_update');
-      socket.off('contact_updated_notification');
       clearInterval(interval);
     };
   }, [socket]);
 
+  // Protección: formatear fecha de forma segura
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
-    try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
+    try {
+      return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    } catch (e) { return ''; }
   };
 
+  // Protección: obtener inicial de forma segura
   const getInitial = (name?: any, phone?: any) => {
     const text = String(name || phone || "?");
     return text.charAt(0).toUpperCase();
@@ -86,10 +85,15 @@ export function Sidebar({ socket, onSelectContact, selectedContactId }: SidebarP
                     ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500' : 'border-l-4 border-transparent'}
                   `}
                 >
-                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold
-                    ${selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400'}
+                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105
+                    ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''}
+                    ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}
                   `}>
-                    {getInitial(contact.name, contact.phone)}
+                    {contact.avatar ? (
+                        <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                        getInitial(contact.name, contact.phone)
+                    )}
                   </div>
                   
                   <div className="flex-1 min-w-0">
