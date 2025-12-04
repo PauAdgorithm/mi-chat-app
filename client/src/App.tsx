@@ -9,7 +9,6 @@ import { MessageCircle, LogOut, Settings as SettingsIcon } from 'lucide-react';
 const isProduction = window.location.hostname.includes('render.com');
 const BACKEND_URL = isProduction ? "https://chatgorithm.onrender.com" : "http://localhost:3000";
 
-// Inicializamos el socket fuera para evitar reconexiones
 const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5 });
 
 function App() {
@@ -17,14 +16,12 @@ function App() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   
-  // Estado Global de Configuración
   const [config, setConfig] = useState<{departments: string[], statuses: string[]}>({ 
       departments: [], 
       statuses: [] 
   });
 
   useEffect(() => {
-    // 1. Recuperar sesión guardada
     const savedUser = localStorage.getItem('chatgorithm_user');
     if (savedUser) {
         try {
@@ -34,10 +31,7 @@ function App() {
         } catch (e) { console.error(e); }
     }
 
-    // 2. Escuchar actualizaciones de configuración en tiempo real
     socket.on('config_list', (list: any[]) => {
-        console.log("🔄 Config actualizada:", list);
-        
         const depts = list.filter(i => i.type === 'Department').map(i => i.name);
         const stats = list.filter(i => i.type === 'Status').map(i => i.name);
         
@@ -47,12 +41,8 @@ function App() {
         });
     });
 
-    // Pedir la config inicial
     socket.emit('request_config');
-
-    return () => {
-        socket.off('config_list');
-    };
+    return () => { socket.off('config_list'); };
   }, []);
 
   const handleLogin = (username: string, role: string) => {
@@ -64,12 +54,9 @@ function App() {
 
   const handleLogout = () => {
       localStorage.removeItem('chatgorithm_user');
-      setUser(null); 
-      setSelectedContact(null); 
-      window.location.reload();
+      setUser(null); setSelectedContact(null); window.location.reload();
   };
 
-  // --- PANTALLA DE LOGIN ---
   if (!user) {
       return (
         <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -80,24 +67,21 @@ function App() {
       );
   }
 
-  // --- PANTALLA DE AJUSTES (NUEVO: Pasamos el rol) ---
   if (view === 'settings') {
-      return (
-        <Settings 
-            onBack={() => setView('chat')} 
-            socket={socket} 
-            currentUserRole={user.role} 
-        />
-      );
+      return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} />;
   }
 
-  // --- PANTALLA PRINCIPAL (CHAT) ---
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
           
-          {/* Barra Lateral */}
-          <div className="w-80 flex-shrink-0 flex flex-col border-r border-gray-100 bg-slate-50/50">
+          {/* LÓGICA RESPONSIVE:
+             - Si hay contacto seleccionado: Ocultamos Sidebar en móvil (hidden), mostramos en PC (md:flex)
+             - Si NO hay contacto: Mostramos Sidebar en móvil (flex) y en PC (md:flex)
+          */}
+          <div className={`w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 
+              ${selectedContact ? 'hidden md:flex' : 'flex'}
+          `}>
             <Sidebar 
                 user={user} 
                 socket={socket} 
@@ -105,26 +89,31 @@ function App() {
                 selectedContactId={selectedContact?.id} 
             />
             
-            {/* Footer Sidebar */}
             <div className="p-3 border-t border-slate-200 bg-white flex gap-2">
-                <button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition" title="Configuración"><SettingsIcon className="w-5 h-5" /></button>
+                <button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition"><SettingsIcon className="w-5 h-5" /></button>
                 <div className="flex-1 flex items-center gap-2 bg-slate-50 px-3 rounded-lg border border-slate-100">
                     <div className="w-2 h-2 rounded-full bg-green-500"></div>
                     <span className="text-xs font-bold text-slate-600 truncate">{user.username}</span>
                 </div>
-                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Salir"><LogOut className="w-5 h-5" /></button>
+                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><LogOut className="w-5 h-5" /></button>
             </div>
           </div>
 
-          {/* Área Principal */}
-          <main className="flex-1 flex flex-col min-w-0 bg-white relative">
+          {/* LÓGICA RESPONSIVE:
+             - Si hay contacto: Mostramos Chat en móvil (flex) y PC (md:flex)
+             - Si NO hay contacto: Ocultamos Chat en móvil (hidden), mostramos placeholder en PC (md:flex)
+          */}
+          <main className={`flex-1 flex-col min-w-0 bg-white relative 
+              ${selectedContact ? 'flex' : 'hidden md:flex'}
+          `}>
             <div className="flex-1 overflow-hidden relative">
               {selectedContact ? (
                 <ChatWindow 
                     socket={socket} 
                     user={user} 
                     contact={selectedContact} 
-                    config={config} // Pasamos la configuración dinámica
+                    config={config}
+                    onBack={() => setSelectedContact(null)} // PASAMOS LA FUNCIÓN DE VOLVER
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
