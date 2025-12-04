@@ -144,7 +144,8 @@ export function Login({ onLogin, socket }: LoginProps) {
                         >
                             <option value="Ventas">Ventas</option>
                             <option value="Taller">Taller</option>
-                            <option value="Administración">Administración</option>
+                            {/* CORRECCIÓN: El valor interno debe ser "Admin" para coincidir con Airtable */}
+                            <option value="Admin">Administración</option>
                         </select>
                     </div>
                 </div>
