@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, RefreshCw, Filter, UserCheck, Briefcase } from 'lucide-react';
+import { Users, Search, RefreshCw, UserCheck, Briefcase } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -7,14 +7,14 @@ export interface Contact {
   name?: string;
   status?: string;
   department?: string;
-  assigned_to?: string; // Nuevo campo
+  assigned_to?: string;
   last_message?: string;
   last_message_time?: string;
   avatar?: string;
 }
 
 interface SidebarProps {
-  user: { username: string, role: string }; // Necesitamos el rol
+  user: { username: string, role: string };
   socket: any;
   onSelectContact: (contact: Contact) => void;
   selectedContactId?: string;
@@ -29,12 +29,21 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
 
   useEffect(() => {
     if (!socket) return;
+
     socket.on('contacts_update', (newContacts: any) => {
-      if (Array.isArray(newContacts)) setContacts(newContacts);
+      if (Array.isArray(newContacts)) {
+        setContacts(newContacts);
+      }
     });
+
     socket.emit('request_contacts');
-    socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
+    
+    socket.on('contact_updated_notification', () => {
+        socket.emit('request_contacts');
+    });
+
     const interval = setInterval(() => socket.emit('request_contacts'), 5000);
+
     return () => {
       socket.off('contacts_update');
       socket.off('contact_updated_notification');
@@ -52,17 +61,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
     return text.charAt(0).toUpperCase();
   };
 
-  // --- LÓGICA DE FILTRADO ---
+  // --- LÓGICA DE FILTRADO MEJORADA ---
   const filteredContacts = contacts.filter(c => {
-      // 1. Filtro de Búsqueda (Texto)
+      // 1. Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
                             (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // 2. Filtro de Pestañas (Lógica CRM)
+      // 2. Filtros
       if (filter === 'all') return true;
-      if (filter === 'mine') return c.assigned_to === user.username;
-      if (filter === 'dept') return c.department === user.role; // Ej: Si soy Ventas, veo Ventas
+      
+      // CAMBIO: "Míos" ahora incluye lo asignado a mí O lo de mi departamento
+      if (filter === 'mine') {
+          return c.assigned_to === user.username || c.department === user.role;
+      }
+      
+      if (filter === 'dept') return c.department === user.role;
+      
+      // Sin Asignar: Ni tienen agente ni tienen departamento
       if (filter === 'unassigned') return !c.assigned_to && !c.department;
       
       return true;
@@ -70,9 +86,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
 
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
-      
-      <div className="bg-white p-3 border-b border-gray-200 space-y-3">
-        {/* BUSCADOR */}
+      <div className="p-4 border-b border-gray-200 bg-white">
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bandeja de Entrada</h2>
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <input 
@@ -84,37 +99,23 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
           />
         </div>
 
-        {/* PESTAÑAS DE FILTRO */}
-        <div className="flex gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar">
-            <button 
-                onClick={() => setFilter('all')}
-                className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-                Todos
-            </button>
-            <button 
-                onClick={() => setFilter('mine')}
-                className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap flex items-center justify-center gap-1 ${filter === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
+        {/* PESTAÑAS */}
+        <div className="flex gap-1 mt-3 p-1 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar">
+            <button onClick={() => setFilter('all')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
+            
+            <button onClick={() => setFilter('mine')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap flex items-center justify-center gap-1 ${filter === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <UserCheck className="w-3 h-3" /> Míos
             </button>
-            {/* Solo mostramos pestaña Dept si el usuario tiene un rol de departamento válido */}
-            {['Ventas', 'Taller', 'Admin'].includes(user.role) && (
-                <button 
-                    onClick={() => setFilter('dept')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap flex items-center justify-center gap-1 ${filter === 'dept' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Briefcase className="w-3 h-3" /> {user.role === 'Admin' ? 'Admin' : user.role}
-                </button>
-            )}
+            
+            <button onClick={() => setFilter('unassigned')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'unassigned' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Sin Asignar</button>
         </div>
       </div>
 
-      {/* LISTA */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center opacity-70">
-            {searchQuery ? <p>No hay resultados</p> : <p>No hay chats en esta bandeja</p>}
+          <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
+            <RefreshCw className="w-5 h-5 animate-spin text-blue-400 mb-2" />
+            <p>No hay chats aquí.</p>
           </div>
         ) : (
           <ul className="divide-y divide-gray-100">
@@ -122,7 +123,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
               <li key={contact.id || Math.random()}>
                 <button 
                   onClick={() => onSelectContact(contact)}
-                  className={`w-full flex items-start gap-3 p-3 transition-all hover:bg-white text-left group
+                  className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group
                     ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}
                   `}
                 >
@@ -132,11 +133,13 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
                   `}>
                     {contact.avatar ? (
                         <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" />
-                    ) : getInitial(contact.name, contact.phone)}
+                    ) : (
+                        getInitial(contact.name, contact.phone)
+                    )}
                   </div>
                   
                   <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-baseline mb-0.5">
+                    <div className="flex justify-between items-baseline mb-1">
                       <span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>
                         {String(contact.name || contact.phone || "Desconocido")}
                       </span>
@@ -144,17 +147,25 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
                         {formatTime(contact.last_message_time)}
                       </span>
                     </div>
-                    
-                    <p className={`text-xs truncate h-4 mb-1.5 ${selectedContactId === contact.id ? 'text-slate-600' : 'text-slate-500'}`}>
+                    <p className="text-xs text-slate-500 truncate h-4">
                       {String(contact.last_message || "Haz clic para ver el chat")}
                     </p>
                     
-                    <div className="flex gap-1 flex-wrap">
-                        {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold rounded">NUEVO</span>}
-                        {contact.department && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200">{String(contact.department).toUpperCase()}</span>}
+                    <div className="flex gap-1 mt-2 flex-wrap">
+                        {contact.status === 'Nuevo' && (
+                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>
+                        )}
+                        
+                        {/* CAMBIO: Estilo Morado para el Departamento */}
+                        {contact.department && (
+                            <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">
+                                {String(contact.department)}
+                            </span>
+                        )}
+
                         {contact.assigned_to && (
-                            <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded flex items-center gap-1 ${contact.assigned_to === user.username ? 'bg-blue-100 text-blue-700' : 'bg-purple-50 text-purple-600'}`}>
-                                <UserCheck className="w-3 h-3" /> {contact.assigned_to === user.username ? 'MÍO' : contact.assigned_to}
+                            <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1">
+                                <UserCheck className="w-3 h-3" /> {contact.assigned_to}
                             </span>
                         )}
                     </div>
