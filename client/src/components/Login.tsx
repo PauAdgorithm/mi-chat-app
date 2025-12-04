@@ -24,8 +24,17 @@ export function Login({ onLogin, socket }: LoginProps) {
         // Pedir lista al cargar
         socket.emit('request_agents');
         
-        socket.on('agents_list', (list: Agent[]) => {
-            setAgents(list);
+        socket.on('agents_list', (list: any[]) => {
+            console.log("👥 Lista de agentes recibida:", list);
+            
+            // PROTECCIÓN ANTI-CRASH: 
+            // 1. Aseguramos que sea un array
+            // 2. Filtramos agentes que sean null o no tengan nombre (filas vacías de Airtable)
+            const safeList = Array.isArray(list) 
+                ? list.filter(agent => agent && agent.name && agent.name.trim() !== "") 
+                : [];
+                
+            setAgents(safeList);
             setLoading(false);
         });
     }
@@ -40,6 +49,11 @@ export function Login({ onLogin, socket }: LoginProps) {
         setNewName('');
         setIsCreating(false);
     }
+  };
+
+  // Helper seguro para iniciales
+  const getInitial = (name: string) => {
+      return (name || "?").charAt(0).toUpperCase();
   };
 
   return (
@@ -69,18 +83,22 @@ export function Login({ onLogin, socket }: LoginProps) {
                 ) : (
                     agents.map((agent) => (
                         <button
-                            key={agent.id}
+                            key={agent.id || Math.random()}
                             onClick={() => onLogin(agent.name, agent.role)}
                             className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left relative overflow-hidden"
                         >
                             <div className="absolute inset-0 bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                             <div className="flex items-center gap-4 relative z-10">
                                 <div className="h-12 w-12 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg group-hover:from-blue-500 group-hover:to-indigo-600 group-hover:text-white transition-all shadow-sm">
-                                    {agent.name.charAt(0).toUpperCase()}
+                                    {getInitial(agent.name)}
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-slate-700 group-hover:text-blue-700 text-lg">{agent.name}</h3>
-                                    <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 group-hover:bg-white group-hover:border-blue-200">{agent.role}</span>
+                                    <h3 className="font-bold text-slate-700 group-hover:text-blue-700 text-lg">
+                                        {agent.name || "Sin Nombre"}
+                                    </h3>
+                                    <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 group-hover:bg-white group-hover:border-blue-200">
+                                        {agent.role || "Agente"}
+                                    </span>
                                 </div>
                             </div>
                             <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 transition-transform group-hover:translate-x-1 relative z-10" />
