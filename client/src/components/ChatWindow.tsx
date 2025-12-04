@@ -17,14 +17,13 @@ interface Message {
   mediaId?: string;
 }
 
-// --- REPRODUCTOR DE AUDIO PRO (Velocidad + Volumen) ---
+// --- REPRODUCTOR DE AUDIO (DISEÑO MEJORADO) ---
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   
-  // Nuevos estados
   const [playbackRate, setPlaybackRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
@@ -32,7 +31,6 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // Efecto para aplicar volumen y velocidad cuando cambian
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.playbackRate = playbackRate;
@@ -49,7 +47,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   };
 
   const toggleSpeed = () => {
-    const speeds = [1, 1.25, 1.5, 2];
+    const speeds = [1, 1.5, 2];
     const nextIndex = (speeds.indexOf(playbackRate) + 1) % speeds.length;
     setPlaybackRate(speeds[nextIndex]);
   };
@@ -92,7 +90,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   };
 
   return (
-    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[320px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
+    <div className={`flex items-center gap-3 p-3 rounded-xl min-w-[280px] sm:min-w-[320px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-white border border-slate-100'}`}>
       <audio
         ref={audioRef}
         src={src}
@@ -102,71 +100,73 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
         className="hidden"
       />
       
-      {/* Botón Play/Pause */}
+      {/* Botón Play Grande */}
       <button 
         onClick={togglePlay}
-        className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-500 text-white hover:bg-slate-600'}`}
+        className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
       >
-        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
       </button>
 
-      {/* Barra de Progreso */}
-      <div className="flex-1 flex flex-col justify-center mx-1">
+      {/* Columna de Controles */}
+      <div className="flex-1 flex flex-col justify-center gap-1.5">
+        {/* Barra de Progreso (Ancha) */}
         <input
           type="range"
           min="0"
           max="100"
           value={progress}
           onChange={handleSeek}
-          className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-600 bg-gray-300'}`}
+          className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-green-700 bg-green-300' : 'accent-slate-500 bg-slate-200'}`}
         />
-      </div>
 
-      {/* Tiempo */}
-      <div className="text-[10px] font-mono font-medium text-slate-600 w-[35px] text-right tabular-nums">
-        {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
-      </div>
+        {/* Fila de Info: Tiempo | Velocidad | Volumen */}
+        <div className="flex justify-between items-center text-[11px] font-medium text-slate-500">
+            {/* Tiempo Dinámico */}
+            <span className="min-w-[35px]">
+                {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
+            </span>
+            
+            <div className="flex items-center gap-3">
+                {/* Botón Velocidad */}
+                <button 
+                    onClick={toggleSpeed}
+                    className="px-2 py-0.5 bg-black/5 hover:bg-black/10 rounded-full text-slate-600 transition"
+                >
+                    {playbackRate}x
+                </button>
 
-      {/* Botón Velocidad */}
-      <button 
-        onClick={toggleSpeed}
-        className="px-1.5 py-0.5 bg-black/10 hover:bg-black/20 rounded text-[10px] font-bold text-slate-700 min-w-[28px] text-center transition"
-        title="Cambiar velocidad"
-      >
-        {playbackRate}x
-      </button>
-
-      {/* Control Volumen (Hover para mostrar slider) */}
-      <div 
-        className="relative flex items-center"
-        onMouseEnter={() => setShowVolumeSlider(true)}
-        onMouseLeave={() => setShowVolumeSlider(false)}
-      >
-        <button 
-            onClick={toggleMute}
-            className="p-1 text-slate-500 hover:text-slate-700 transition"
-        >
-            {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-        </button>
-        
-        {/* Slider de Volumen Flotante */}
-        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-lg rounded-lg p-2 transition-all duration-200 ${showVolumeSlider ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
-            <div className="h-24 w-6 flex items-center justify-center">
-                <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.1"
-                    value={isMuted ? 0 : volume}
-                    onChange={(e) => {
-                        setVolume(parseFloat(e.target.value));
-                        setIsMuted(parseFloat(e.target.value) === 0);
-                    }}
-                    className="-rotate-90 w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
+                {/* Volumen */}
+                <div 
+                    className="relative flex items-center group"
+                    onMouseEnter={() => setShowVolumeSlider(true)}
+                    onMouseLeave={() => setShowVolumeSlider(false)}
+                >
+                    <button onClick={toggleMute} className="hover:text-slate-800 transition">
+                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                    </button>
+                    
+                    {/* Slider Volumen Flotante */}
+                    <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 transition-all duration-200 z-10 ${showVolumeSlider ? 'opacity-100 visible scale-100' : 'opacity-0 invisible scale-95'}`}>
+                        <div className="h-20 w-6 flex items-center justify-center">
+                            <input 
+                                type="range" 
+                                min="0" 
+                                max="1" 
+                                step="0.1"
+                                value={isMuted ? 0 : volume}
+                                onChange={(e) => {
+                                    setVolume(parseFloat(e.target.value));
+                                    setIsMuted(parseFloat(e.target.value) === 0);
+                                }}
+                                className="-rotate-90 w-16 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            />
+                        </div>
+                        {/* Flechita decorativa */}
+                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white rotate-45"></div>
+                    </div>
+                </div>
             </div>
-            {/* Triangulito decorativo */}
-            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white rotate-45"></div>
         </div>
       </div>
     </div>
@@ -180,7 +180,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
-  // Estados para el CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -249,7 +248,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
+        
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+
+        const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
@@ -258,17 +261,17 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         };
 
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const audioFile = new File([audioBlob], "voice_note.webm", { type: 'audio/webm' });
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+            const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+            const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
             await uploadFile(audioFile);
             stream.getTracks().forEach(track => track.stop());
         };
 
         mediaRecorder.start();
         setIsRecording(true);
-    } catch (error) {
-        console.error("Error microfono:", error);
-        alert("No se pudo acceder al micrófono.");
+    } catch (error: any) {
+        alert(`Error micrófono: ${error.message}`);
     }
   };
 
@@ -279,7 +282,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       }
   };
 
-  // --- SUBIDA ARCHIVOS ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
@@ -312,8 +314,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
-      const updates: any = {};
-      updates[field] = value;
+      const updates: any = {}; updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
 
@@ -374,7 +375,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                     
                     {m.type === 'image' && m.mediaId ? (
                         <div className="mb-1 group relative">
-                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
+                            <img 
+                                src={`${API_URL}/api/media/${m.mediaId}`} 
+                                alt="Imagen" 
+                                className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5"
+                                onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }}
+                            />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
                         <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
