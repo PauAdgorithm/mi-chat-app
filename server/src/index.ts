@@ -38,7 +38,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- RUTA: TUNEL MEDIA (Descargar fotos/audios de Meta) ---
+// --- TUNEL MEDIA ---
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
@@ -50,47 +50,61 @@ app.get('/api/media/:id', async (req, res) => {
             headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream'
         });
         res.setHeader('Content-Type', mediaRes.headers['content-type']);
+        // Forzamos la descarga si es un documento para evitar problemas de visualización
+        // res.setHeader('Content-Disposition', 'attachment'); 
         mediaRes.data.pipe(res);
     } catch (e) { res.sendStatus(404); }
 });
 
-// --- RUTA: SUBIR ARCHIVOS (Imágenes y Audios) ---
+// --- SUBIR CUALQUIER ARCHIVO ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
     const targetPhone = req.body.targetPhone;
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
-    // Detectar tipo de archivo
-    const isAudio = file.mimetype.includes('audio');
-    const msgType = isAudio ? 'audio' : 'image';
+    // 1. Detectar tipo de mensaje para WhatsApp
+    const mime = file.mimetype;
+    let msgType = 'document'; // Por defecto es documento (sirve para SVG, PDF, ZIP...)
 
+    // Solo JPG y PNG son imágenes válidas para WhatsApp "image"
+    if (mime === 'image/jpeg' || mime === 'image/png') {
+        msgType = 'image';
+    } else if (mime.startsWith('audio/')) {
+        msgType = 'audio';
+    }
+
+    // 2. Subir a Meta
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
 
-    // 1. Subir a Meta
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, {
         headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() }
     });
     const mediaId = uploadRes.data.id;
 
-    // 2. Enviar mensaje
+    // 3. Enviar mensaje a WhatsApp
     const messagePayload: any = {
         messaging_product: "whatsapp", 
         to: targetPhone, 
         type: msgType
     };
-    // WhatsApp pide objetos distintos según el tipo
-    if (isAudio) messagePayload.audio = { id: mediaId };
-    else messagePayload.image = { id: mediaId };
+
+    if (msgType === 'image') messagePayload.image = { id: mediaId };
+    else if (msgType === 'audio') messagePayload.audio = { id: mediaId };
+    else messagePayload.document = { id: mediaId, filename: file.originalname }; // IMPORTANTE: Nombre del archivo
 
     await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, messagePayload, { 
         headers: { Authorization: `Bearer ${waToken}` } 
     });
 
-    // 3. Guardar en Airtable
-    const textLog = isAudio ? "🎤 [Audio enviado]" : "📷 [Imagen enviada]";
+    // 4. Guardar en Airtable (Si es documento, guardamos el nombre del archivo en el texto)
+    let textLog = "";
+    if (msgType === 'image') textLog = "📷 [Imagen]";
+    else if (msgType === 'audio') textLog = "🎤 [Audio]";
+    else textLog = file.originalname; // Guardamos el nombre "factura.pdf"
+
     await saveAndEmitMessage({
         text: textLog, 
         sender: "Agente", 
@@ -99,8 +113,10 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
         type: msgType,
         mediaId: mediaId
     });
-    await handleContactUpdate(targetPhone, `Tú: ${textLog}`);
+    
+    await handleContactUpdate(targetPhone, `Tú: 📎 Archivo`);
     res.json({ success: true });
+
   } catch (error: any) { 
       console.error("Error upload:", error.response?.data || error.message);
       res.status(500).json({ error: "Error subiendo archivo" }); 
@@ -121,7 +137,7 @@ app.post('/webhook', async (req, res) => {
         const value = body.entry[0].changes[0].value;
         const msgData = value.messages[0];
         
-        // Capturar nombre perfil
+        // Nombre perfil
         const profileName = value.contacts?.[0]?.profile?.name || "";
         const from = msgData.from; 
         
@@ -129,14 +145,24 @@ app.post('/webhook', async (req, res) => {
         let type = msgData.type;
         let mediaId = "";
 
-        if (type === 'text') text = msgData.text.body;
-        else if (type === 'image') {
-            text = msgData.image.caption || "📷 Imagen recibida";
+        // Lógica de detección de tipos recibidos
+        if (type === 'text') {
+            text = msgData.text.body;
+        } else if (type === 'image') {
+            text = msgData.image.caption || "📷 Imagen";
             mediaId = msgData.image.id;
         } else if (type === 'audio' || type === 'voice') {
-            text = "🎤 Audio recibido";
+            text = "🎤 Audio";
             mediaId = (msgData.audio || msgData.voice).id;
-            type = 'audio'; // Normalizamos 'voice' a 'audio'
+            type = 'audio';
+        } else if (type === 'document') {
+            text = msgData.document.filename || "📄 Documento";
+            mediaId = msgData.document.id;
+        } else if (type === 'sticker') {
+            text = "👾 Sticker";
+            // Los stickers a veces no tienen URL descargable fácil, lo tratamos como texto por ahora
+        } else {
+            text = `[${type}]`;
         }
         
         console.log(`📩 De ${from}: ${text}`);

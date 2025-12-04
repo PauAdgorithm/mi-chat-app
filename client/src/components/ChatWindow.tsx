@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square } from 'lucide-react';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download } from 'lucide-react';
 import { Contact } from './Sidebar';
+
+// ----------------------------------------------------------------------
+// ⚠️ IMPORTANTE: Descomenta la siguiente línea en tu proyecto local:
+// import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+// ----------------------------------------------------------------------
 
 interface ChatWindowProps {
   socket: any;
@@ -27,12 +31,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Referencias para la grabación de audio
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -89,7 +92,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
-  // --- LÓGICA DE GRABACIÓN DE AUDIO ---
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -102,14 +104,9 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         };
 
         mediaRecorder.onstop = async () => {
-            // Crear el archivo de audio
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
             const audioFile = new File([audioBlob], "voice_note.webm", { type: 'audio/webm' });
-            
-            // Subirlo como si fuera un archivo normal
             await uploadFile(audioFile);
-            
-            // Apagar micrófono
             stream.getTracks().forEach(track => track.stop());
         };
 
@@ -117,7 +114,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         setIsRecording(true);
     } catch (error) {
         console.error("Error micrófono:", error);
-        alert("No se pudo acceder al micrófono. Verifica los permisos.");
+        alert("No se pudo acceder al micrófono.");
     }
   };
 
@@ -128,7 +125,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       }
   };
 
-  // --- SUBIDA GENÉRICA (Sirve para fotos y audios) ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
@@ -155,9 +151,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
   };
 
+  // ⚠️ DESCOMENTAR EN LOCAL:
+  /*
   const onEmojiClick = (emojiData: EmojiClickData) => {
     setInput((prev) => prev + emojiData.emoji);
   };
+  */
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
@@ -170,7 +169,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
       
-      {/* LIGHTBOX DE FOTOS */}
+      {/* LIGHTBOX */}
       {selectedImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}>
             <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button>
@@ -198,7 +197,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* ÁREA DE MENSAJES */}
+      {/* ÁREA MENSAJES */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -213,7 +212,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                 
-                {/* LÓGICA VISUAL: IMAGEN vs AUDIO vs TEXTO */}
+                {/* LÓGICA DE VISUALIZACIÓN */}
                 {m.type === 'image' && m.mediaId ? (
                     <div className="mb-1 group relative">
                         <img 
@@ -224,9 +223,28 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         />
                     </div>
                 ) : m.type === 'audio' && m.mediaId ? (
-                    // 🎵 AQUÍ ESTÁ EL REPRODUCTOR DE AUDIO
                     <div className="flex items-center gap-2 min-w-[240px]">
                         <audio controls src={`${API_URL}/api/media/${m.mediaId}`} className="h-8 w-full" />
+                    </div>
+                ) : m.type === 'document' && m.mediaId ? (
+                    // 📄 VISUALIZACIÓN DE DOCUMENTO
+                    <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
+                        <div className="bg-red-100 p-2 rounded-full text-red-500">
+                            <FileText className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-slate-700 truncate">{m.text}</p>
+                            <p className="text-xs text-slate-400">Documento</p>
+                        </div>
+                        <a 
+                            href={`${API_URL}/api/media/${m.mediaId}`} 
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"
+                            title="Descargar"
+                        >
+                            <Download className="w-5 h-5" />
+                        </a>
                     </div>
                 ) : (
                     <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
@@ -243,44 +261,32 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       {/* EMOJI PICKER */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
+            {/* ⚠️ DESCOMENTAR EN LOCAL: */}
+            {/* <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /> */}
+            <div className="bg-white p-4 rounded text-xs text-red-500">Activa el EmojiPicker en código.</div>
         </div>
       )}
 
-      {/* INPUT / MICROFONO */}
+      {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
+          {/* Input file sin restricción de tipo */}
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Enviar foto">
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar archivo">
             <Paperclip className="w-5 h-5" />
           </button>
           
-          <input 
-            type="text" 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)} 
-            placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} 
-            disabled={isUploading || isRecording} 
-            className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none text-sm transition-all ${isRecording ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' : 'bg-slate-50 border-slate-200 focus:border-blue-300'}`} 
-          />
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none text-sm transition-all ${isRecording ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' : 'bg-slate-50 border-slate-200 focus:border-blue-300'}`} />
           
           <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
             <Smile className="w-5 h-5" />
           </button>
 
-          {/* BOTÓN INTELIGENTE: Si hay texto -> ENVIAR. Si no -> MICRO */}
           {input.trim() ? (
-              <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm">
-                <Send className="w-5 h-5" />
-              </button>
+              <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button>
           ) : (
-              <button 
-                type="button" 
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`}
-                title="Grabar audio"
-              >
+              <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'}`} title="Grabar audio">
                 {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Mic className="w-5 h-5" />}
               </button>
           )}
