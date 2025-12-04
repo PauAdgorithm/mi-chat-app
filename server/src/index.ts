@@ -8,6 +8,9 @@ import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
 
+// LOG DE INICIO
+console.log("🚀 [BOOT] Servidor iniciando...");
+
 dotenv.config();
 
 const app = express();
@@ -29,7 +32,7 @@ if (airtableApiKey && airtableBaseId) {
   try {
     Airtable.configure({ apiKey: airtableApiKey });
     base = Airtable.base(airtableBaseId);
-    console.log("✅ Airtable configurado");
+    console.log("✅ Airtable conectado");
   } catch (e) { console.error("Error Airtable config:", e); }
 }
 
@@ -38,7 +41,9 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// --- RUTA: TUNEL MEDIA ---
+// --- RUTAS API ---
+app.get('/', (req, res) => { res.status(200).send('🟢 Chatgorithm Backend Online'); });
+
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
@@ -52,26 +57,27 @@ app.get('/api/media/:id', async (req, res) => {
     } catch (e) { res.sendStatus(404); }
 });
 
-// --- SUBIDA ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
-    const targetPhone = req.body.targetPhone;
+    let targetPhone = req.body.targetPhone;
     const senderName = req.body.senderName || "Agente";
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
-    const cleanTarget = cleanNumber(targetPhone);
+    targetPhone = cleanNumber(targetPhone);
+
     const mime = file.mimetype;
     let msgType = 'document'; 
     if (mime === 'image/jpeg' || mime === 'image/png') msgType = 'image';
-    else if (['audio/aac', 'audio/mp4', 'audio/amr', 'audio/mpeg', 'audio/ogg'].includes(mime) || mime.includes('audio')) msgType = 'audio';
+    else if (mime.startsWith('audio/') || ['audio/aac', 'audio/mp4', 'audio/amr', 'audio/mpeg', 'audio/ogg'].includes(mime)) msgType = 'audio';
 
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
+
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } });
     const mediaId = uploadRes.data.id;
 
-    const payload: any = { messaging_product: "whatsapp", to: cleanTarget, type: msgType };
+    const payload: any = { messaging_product: "whatsapp", to: targetPhone, type: msgType };
     if (msgType === 'image') payload.image = { id: mediaId };
     else if (msgType === 'audio') payload.audio = { id: mediaId };
     else payload.document = { id: mediaId, filename: file.originalname };
@@ -82,14 +88,14 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     let saveType = 'document';
     if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; }
     else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; }
+    else if (mime.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; }
 
-    await saveAndEmitMessage({ text: textLog, sender: senderName, recipient: cleanTarget, timestamp: new Date().toISOString(), type: saveType, mediaId: mediaId });
-    await handleContactUpdate(cleanTarget, `Tú (${senderName}): 📎 Archivo`);
+    await saveAndEmitMessage({ text: textLog, sender: senderName, recipient: targetPhone, timestamp: new Date().toISOString(), type: saveType, mediaId: mediaId });
+    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); }
+  } catch (error: any) { res.status(500).json({ error: "Error upload" }); }
 });
 
-// --- WEBHOOK ---
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']);
   else res.sendStatus(403);
@@ -103,8 +109,18 @@ app.post('/webhook', async (req, res) => {
         const msgData = value.messages[0];
         const profileName = value.contacts?.[0]?.profile?.name || "";
         const from = msgData.from; 
-        let text = "(Desconocido)"; let type = msgData.type; let mediaId = "";
-        if (type === 'text') text = msgData.text.body; else if (type === 'image') { text = msgData.image.caption || "📷 Imagen"; mediaId = msgData.image.id; } else if (type === 'audio' || type === 'voice') { text = "🎤 Audio"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; } else if (type === 'document') { text = msgData.document.filename || "📄 Documento"; mediaId = msgData.document.id; }
+        
+        let text = "(Desconocido)";
+        let type = msgData.type;
+        let mediaId = "";
+
+        if (type === 'text') text = msgData.text.body;
+        else if (type === 'image') { text = msgData.image.caption || "📷 Imagen"; mediaId = msgData.image.id; }
+        else if (type === 'audio' || type === 'voice') { text = "🎤 Audio"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; }
+        else if (type === 'document') { text = msgData.document.filename || "📄 Documento"; mediaId = msgData.document.id; }
+        else if (type === 'sticker') text = "👾 Sticker";
+        
+        console.log(`📩 Webhook de ${from}: ${text}`);
         await handleContactUpdate(from, text, profileName);
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
@@ -112,15 +128,15 @@ app.post('/webhook', async (req, res) => {
   } catch (e) { res.sendStatus(500); }
 });
 
-// --- HELPERS ---
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
   if (!base) return;
-  const cleanPhone = cleanNumber(phone);
+  const cleanPhone = cleanNumber(phone); 
   try {
     const contacts = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage();
     const now = new Date().toISOString();
+    
     if (contacts.length > 0) {
       await base('Contacts').update([{ id: contacts[0].id, fields: { "last_message": text, "last_message_time": now } }], { typecast: true });
     } else {
@@ -135,27 +151,35 @@ async function saveAndEmitMessage(msg: any) {
   io.emit('message', msg); 
   if (base) {
     try {
-      await base('Messages').create([{ fields: { "text": msg.text || "", "sender": msg.sender || "Desc", "recipient": msg.recipient || "", "timestamp": msg.timestamp || new Date().toISOString(), "type": msg.type || "text", "media_id": msg.mediaId || "" } }], { typecast: true });
+      await base('Messages').create([{ 
+        fields: { 
+            "text": msg.text || "", 
+            "sender": msg.sender || "Desc", 
+            "recipient": msg.recipient || "", 
+            "timestamp": msg.timestamp || new Date().toISOString(), 
+            "type": msg.type || "text", 
+            "media_id": msg.mediaId || "" 
+        } 
+      }], { typecast: true });
     } catch (e) { console.error("Error guardando:", e); }
   }
 }
 
 // --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  // Agentes
+  // Agentes y Login
   socket.on('request_agents', async () => {
     if (base) {
         try {
             const records = await base('Agents').select().all();
-            const agents = records.map(r => {
-                const pass = r.get('password');
-                return { id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!(pass && String(pass).trim().length > 0) };
-            });
-            socket.emit('agents_list', agents);
+            socket.emit('agents_list', records.map(r => {
+                const p = r.get('password');
+                return { id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!(p && String(p).trim().length > 0) };
+            }));
         } catch (e) { console.error(e); }
     }
   });
-  socket.on('login_attempt', async (data) => { /* login */
+  socket.on('login_attempt', async (data) => {
       if(!base) return;
       try {
           const records = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage();
@@ -166,7 +190,7 @@ io.on('connection', (socket) => {
           } else { socket.emit('login_error', 'Usuario no encontrado'); }
       } catch (e) { socket.emit('login_error', 'Error servidor'); }
   });
-  socket.on('create_agent', async (data) => { /* create */
+  socket.on('create_agent', async (data) => {
       if (!base) return;
       const { newAgent, adminPassword } = data; 
       try {
@@ -191,7 +215,7 @@ io.on('connection', (socket) => {
           socket.emit('action_success', 'Perfil creado');
       } catch (e) { console.error("Error creating:", e); }
   });
-  socket.on('delete_agent', async (data) => { /* delete */
+  socket.on('delete_agent', async (data) => {
       if (!base) return;
       const { agentId, adminPassword } = data;
       try {
@@ -206,7 +230,7 @@ io.on('connection', (socket) => {
       } catch (e) { console.error(e); }
   });
 
-  // --- CORRECCIÓN PRINCIPAL: REQUEST_CONTACTS ---
+  // --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE: SANITIZACIÓN DE CONTACTOS ---
   socket.on('request_contacts', async () => {
     if (base) {
       try {
@@ -214,16 +238,23 @@ io.on('connection', (socket) => {
         socket.emit('contacts_update', records.map(r => {
             const avatarField = r.get('avatar') as any[];
             
-            // SANITIZACIÓN: Aseguramos que last_message sea un texto limpio
+            // 🛡️ LÓGICA ANTI-OBJECT OBJECT
             let rawMsg = r.get('last_message');
             let cleanMsg = "";
-            
-            if (typeof rawMsg === 'string') {
-                cleanMsg = rawMsg;
-            } else if (Array.isArray(rawMsg) && rawMsg.length > 0) {
-                cleanMsg = String(rawMsg[0]); // Si es Lookup, coge el primero
-            } else if (rawMsg) {
-                cleanMsg = String(rawMsg); // Intento final de conversión
+
+            if (rawMsg) {
+                // Si es un objeto (como pasa a veces con Lookups o formatos raros), lo forzamos a string legible o placeholder
+                if (typeof rawMsg === 'object') {
+                     // Si es un array, cogemos el primero
+                     if (Array.isArray(rawMsg) && rawMsg.length > 0) {
+                        cleanMsg = String(rawMsg[0]);
+                     } else {
+                        // Si es un objeto puro, ponemos un texto genérico para evitar [object Object]
+                        cleanMsg = "Mensaje";
+                     }
+                } else {
+                     cleanMsg = String(rawMsg);
+                }
             }
 
             return {
@@ -233,7 +264,7 @@ io.on('connection', (socket) => {
               status: (r.get('status') as string) || "Nuevo",
               department: (r.get('department') as string) || "",
               assigned_to: (r.get('assigned_to') as string) || "",
-              last_message: cleanMsg, // <--- CAMPO ARREGLADO
+              last_message: cleanMsg, // <--- USAMOS EL MENSAJE LIMPIO
               last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(),
               avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null
             };
@@ -286,4 +317,4 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => { console.log(`🚀 Listo ${PORT}`); });
+httpServer.listen(PORT, () => { console.log(`🚀 Servidor listo ${PORT}`); });
