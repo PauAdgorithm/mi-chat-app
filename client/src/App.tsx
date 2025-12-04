@@ -9,7 +9,7 @@ import { MessageCircle, LogOut, Settings as SettingsIcon } from 'lucide-react';
 const isProduction = window.location.hostname.includes('render.com');
 const BACKEND_URL = isProduction ? "https://chatgorithm.onrender.com" : "http://localhost:3000";
 
-// Socket fuera para que sea singleton
+// Inicializamos el socket fuera para evitar reconexiones
 const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'], reconnectionAttempts: 5 });
 
 function App() {
@@ -24,7 +24,7 @@ function App() {
   });
 
   useEffect(() => {
-    // 1. Recuperar sesión
+    // 1. Recuperar sesión guardada
     const savedUser = localStorage.getItem('chatgorithm_user');
     if (savedUser) {
         try {
@@ -36,20 +36,18 @@ function App() {
 
     // 2. Escuchar actualizaciones de configuración en tiempo real
     socket.on('config_list', (list: any[]) => {
-        console.log("🔄 Config actualizada en App:", list);
+        console.log("🔄 Config actualizada:", list);
         
         const depts = list.filter(i => i.type === 'Department').map(i => i.name);
         const stats = list.filter(i => i.type === 'Status').map(i => i.name);
         
-        // Si la lista está vacía (primer arranque), ponemos unos por defecto visuales
-        // pero si viene del server, usamos lo del server.
         setConfig({ 
             departments: depts.length > 0 ? depts : ['Ventas', 'Taller', 'Admin'], 
             statuses: stats.length > 0 ? stats : ['Nuevo', 'Abierto', 'Cerrado'] 
         });
     });
 
-    // Pedir la config inicial al conectar
+    // Pedir la config inicial
     socket.emit('request_config');
 
     return () => {
@@ -71,7 +69,7 @@ function App() {
       window.location.reload();
   };
 
-  // Render
+  // --- PANTALLA DE LOGIN ---
   if (!user) {
       return (
         <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -82,10 +80,18 @@ function App() {
       );
   }
 
+  // --- PANTALLA DE AJUSTES (NUEVO: Pasamos el rol) ---
   if (view === 'settings') {
-      return <Settings onBack={() => setView('chat')} socket={socket} />;
+      return (
+        <Settings 
+            onBack={() => setView('chat')} 
+            socket={socket} 
+            currentUserRole={user.role} 
+        />
+      );
   }
 
+  // --- PANTALLA PRINCIPAL (CHAT) ---
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
@@ -118,7 +124,7 @@ function App() {
                     socket={socket} 
                     user={user} 
                     contact={selectedContact} 
-                    config={config} // <--- ¡AQUÍ PASAMOS LA CONFIGURACIÓN ACTUALIZADA!
+                    config={config} // Pasamos la configuración dinámica
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
