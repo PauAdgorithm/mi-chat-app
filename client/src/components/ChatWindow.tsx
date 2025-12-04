@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download } from 'lucide-react';
 import { Contact } from './Sidebar';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+
+// ----------------------------------------------------------------------
+// ⚠️ IMPORTANTE: Descomenta la siguiente línea en tu proyecto local:
+// import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+// ----------------------------------------------------------------------
 
 interface ChatWindowProps {
   socket: any;
@@ -133,10 +137,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                 method: 'POST',
                 body: formData
             });
-            if (!response.ok) throw new Error('Error subiendo archivo');
+            if (!response.ok) throw new Error('Error subiendo imagen');
         } catch (error) {
             console.error(error);
-            alert("Error al enviar el archivo (formato no soportado por WhatsApp o error de red).");
+            alert("Error al enviar archivo.");
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -147,9 +151,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
   };
 
+  // ⚠️ DESCOMENTAR ESTA FUNCIÓN EN LOCAL:
+  /*
   const onEmojiClick = (emojiData: EmojiClickData) => {
     setInput((prev) => prev + emojiData.emoji);
   };
+  */
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
@@ -170,7 +177,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       )}
 
-      {/* BARRA SUPERIOR */}
+      {/* BARRA SUPERIOR CRM */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -190,7 +197,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* CHAT */}
+      {/* ÁREA MENSAJES */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -210,7 +217,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         <img 
                             src={`${API_URL}/api/media/${m.mediaId}`} 
                             alt="Imagen" 
-                            className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 bg-black/5"
+                            className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90"
                             onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }}
                         />
                     </div>
@@ -239,17 +246,19 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* EMOJIS */}
+      {/* EMOJI PICKER */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
+            {/* ⚠️ DESCOMENTAR ESTO EN LOCAL: */}
+            {/* <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /> */}
+            <div className="bg-white p-4 rounded text-xs text-red-500">Activa el EmojiPicker en código.</div>
         </div>
       )}
 
       {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
-          {/* CAMBIO CLAVE: Quitamos accept="image/*" para permitir todo */}
+          {/* Input file sin restricción de tipo */}
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar archivo">
