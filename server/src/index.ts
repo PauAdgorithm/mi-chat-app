@@ -8,6 +8,8 @@ import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
 
+console.log("🚀 [BOOT] Arrancando servidor...");
+
 dotenv.config();
 
 const app = express();
@@ -17,7 +19,7 @@ app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIG ---
+// --- CONFIGURACIÓN ---
 const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
 const waToken = process.env.WHATSAPP_TOKEN;
@@ -30,13 +32,20 @@ if (airtableApiKey && airtableBaseId) {
     Airtable.configure({ apiKey: airtableApiKey });
     base = Airtable.base(airtableBaseId);
     console.log("✅ Airtable configurado");
-  } catch (e) { console.error("Error Airtable config:", e); }
+  } catch (e) { console.error("Error Airtable:", e); }
 }
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
+
+// --- HELPER: LIMPIAR NÚMERO ---
+// Quita +, espacios y guiones. Deja solo dígitos.
+const cleanNumber = (phone: string) => {
+    if (!phone) return "";
+    return phone.replace(/\D/g, '');
+};
 
 // --- RUTA: TUNEL MEDIA ---
 app.get('/api/media/:id', async (req, res) => {
@@ -47,93 +56,78 @@ app.get('/api/media/:id', async (req, res) => {
             headers: { 'Authorization': `Bearer ${waToken}` }
         });
         const mediaRes = await axios.get(urlRes.data.url, {
-            headers: { 'Authorization': `Bearer ${waToken}` }, 
-            responseType: 'stream'
+            headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream'
         });
         
-        // Pasamos las cabeceras importantes para que el navegador sepa qué es
         res.setHeader('Content-Type', mediaRes.headers['content-type']);
-        if (mediaRes.headers['content-length']) {
-            res.setHeader('Content-Length', mediaRes.headers['content-length']);
-        }
+        if (mediaRes.headers['content-length']) res.setHeader('Content-Length', mediaRes.headers['content-length']);
         res.setHeader('Accept-Ranges', 'bytes');
         
         mediaRes.data.pipe(res);
     } catch (e) { res.sendStatus(404); }
 });
 
-// --- RUTA: SUBIR ARCHIVOS MEJORADA ---
+// --- SUBIDA DE ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
-    const targetPhone = req.body.targetPhone;
+    let targetPhone = req.body.targetPhone;
+    const senderName = req.body.senderName || "Agente";
+
     if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
-    // 1. Detectar tipo
+    // LIMPIEZA DE NÚMERO IMPORTANTE
+    targetPhone = cleanNumber(targetPhone);
+
     const mime = file.mimetype;
     let msgType = 'document'; 
-
-    // WhatsApp es estricto con los audios. 
-    // Solo aceptamos como 'audio' nativo si es ogg o mp4. Si es webm (PC), lo mandamos como documento para que no falle.
-    if (mime === 'image/jpeg' || mime === 'image/png') {
-        msgType = 'image';
-    } else if (mime === 'audio/ogg' || mime === 'audio/mp4' || mime === 'audio/aac') {
-        msgType = 'audio';
-    } else if (mime.includes('audio')) {
-        // Es un audio raro (ej: webm), lo tratamos como documento para asegurar entrega
-        msgType = 'document'; 
-    }
-
-    console.log(`📤 Subiendo ${msgType} (${mime}) a Meta...`);
+    
+    // WhatsApp admite jpg/png como imagen, y ogg/mp4/aac/amr como audio.
+    // Webm (grabación de PC) NO es soportado como audio nativo, se envía como documento.
+    if (mime === 'image/jpeg' || mime === 'image/png') msgType = 'image';
+    else if (['audio/aac', 'audio/mp4', 'audio/amr', 'audio/mpeg', 'audio/ogg'].includes(mime)) msgType = 'audio';
+    
+    console.log(`📤 Subiendo ${msgType} (${mime}) para ${targetPhone}...`);
 
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
 
-    // 2. Subir a Meta
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, {
         headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() }
     });
     const mediaId = uploadRes.data.id;
-    console.log(`✅ ID Media generado: ${mediaId}`);
 
-    // 3. Enviar mensaje
-    const messagePayload: any = {
-        messaging_product: "whatsapp", 
-        to: targetPhone, 
-        type: msgType
-    };
+    const payload: any = { messaging_product: "whatsapp", to: targetPhone, type: msgType };
+    if (msgType === 'image') payload.image = { id: mediaId };
+    else if (msgType === 'audio') payload.audio = { id: mediaId };
+    else payload.document = { id: mediaId, filename: file.originalname };
 
-    if (msgType === 'image') messagePayload.image = { id: mediaId };
-    else if (msgType === 'audio') messagePayload.audio = { id: mediaId };
-    else messagePayload.document = { id: mediaId, filename: file.originalname }; 
-
-    await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, messagePayload, { 
+    await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { 
         headers: { Authorization: `Bearer ${waToken}` } 
     });
 
-    // 4. Guardar en Airtable
-    // Guardamos el tipo como 'audio' internamente aunque lo hayamos enviado como doc, para que el reproductor intente tocarlo
-    const savedType = mime.includes('audio') ? 'audio' : msgType;
     let textLog = file.originalname;
-    if (savedType === 'image') textLog = "📷 [Imagen]";
-    else if (savedType === 'audio') textLog = "🎤 [Audio]";
+    let saveType = 'document';
+    if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; }
+    else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; }
+    else if (mime.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; } // Lo guardamos como audio en DB para que el chat intente reproducirlo
 
     await saveAndEmitMessage({
         text: textLog, 
-        sender: "Agente", 
+        sender: senderName, 
         recipient: targetPhone,
         timestamp: new Date().toISOString(),
-        type: savedType,
+        type: saveType,
         mediaId: mediaId
     });
     
-    await handleContactUpdate(targetPhone, `Tú: 📎 ${textLog}`);
+    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
     res.json({ success: true });
 
   } catch (error: any) { 
-      console.error("❌ Error detallado upload:", error.response?.data || error.message);
-      res.status(500).json({ error: "Error subiendo archivo a WhatsApp" }); 
+      console.error("❌ Error Upload:", error.response?.data || error.message);
+      res.status(500).json({ error: "Error subiendo archivo" }); 
   }
 });
 
@@ -151,7 +145,7 @@ app.post('/webhook', async (req, res) => {
         const value = body.entry[0].changes[0].value;
         const msgData = value.messages[0];
         const profileName = value.contacts?.[0]?.profile?.name || "";
-        const from = msgData.from; 
+        const from = msgData.from; // Este suele venir limpio de Meta
         
         let text = "(Desconocido)";
         let type = msgData.type;
@@ -160,12 +154,9 @@ app.post('/webhook', async (req, res) => {
         if (type === 'text') text = msgData.text.body;
         else if (type === 'image') { text = msgData.image.caption || "📷 Imagen"; mediaId = msgData.image.id; }
         else if (type === 'audio' || type === 'voice') { 
-            text = "🎤 Audio"; 
-            mediaId = (msgData.audio || msgData.voice).id; 
-            type = 'audio'; // Normalizamos
+            text = "🎤 Audio"; mediaId = (msgData.audio || msgData.voice).id; type = 'audio'; 
         } else if (type === 'document') { 
-            text = msgData.document.filename || "📄 Documento"; 
-            mediaId = msgData.document.id; 
+            text = msgData.document.filename || "📄 Documento"; mediaId = msgData.document.id; 
         } else if (type === 'sticker') text = "👾 Sticker";
         
         console.log(`📩 De ${from}: ${text}`);
@@ -173,30 +164,28 @@ app.post('/webhook', async (req, res) => {
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
     res.sendStatus(200);
-  } catch (e) { console.error("Webhook error:", e); res.sendStatus(500); }
+  } catch (e) { console.error(e); res.sendStatus(500); }
 });
 
-// --- HELPERS ---
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
   if (!base) return;
-  const cleanPhone = phone.replace(/\D/g, ''); 
+  const cleanPhone = cleanNumber(phone); 
   try {
-    const contacts = await base('Contacts').select({ filterByFormula: `{phone} = '${phone}'`, maxRecords: 1 }).firstPage();
+    const contacts = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage();
     const now = new Date().toISOString();
     
     if (contacts.length > 0) {
       await base('Contacts').update([{ id: contacts[0].id, fields: { "last_message": text, "last_message_time": now } }], { typecast: true });
     } else {
-      const newName = profileName ? `${phone} (${profileName})` : phone;
-      await base('Contacts').create([{ fields: { "phone": phone, "name": newName, "status": "Nuevo", "last_message": text, "last_message_time": now } }], { typecast: true });
+      const newName = profileName ? `${cleanPhone} (${profileName})` : cleanPhone;
+      await base('Contacts').create([{ fields: { "phone": cleanPhone, "name": newName, "status": "Nuevo", "last_message": text, "last_message_time": now } }], { typecast: true });
       io.emit('contact_updated_notification');
     }
   } catch (e) { console.error("Error Contactos:", e); }
 }
 
-// --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  // ... (Mantén la lógica de request_contacts, request_conversation, update_contact_info igual) ...
+  // ... (Resto de lógica de Sockets igual)
   socket.on('request_contacts', async () => {
     if (base) {
       try {
@@ -220,23 +209,28 @@ io.on('connection', (socket) => {
 
   socket.on('request_conversation', async (phone) => {
     if (base) {
-      const records = await base('Messages').select({
-        filterByFormula: `OR({sender} = '${phone}', {recipient} = '${phone}')`, 
-        sort: [{ field: "timestamp", direction: "asc" }]
-      }).all();
-      socket.emit('conversation_history', records.map(r => ({
-        text: (r.get('text') as string) || "",
-        sender: (r.get('sender') as string) || "",
-        timestamp: (r.get('timestamp') as string) || "",
-        type: (r.get('type') as string) || "text",
-        mediaId: (r.get('media_id') as string) || "" 
-      })));
+      const cleanPhone = cleanNumber(phone);
+      try {
+        const records = await base('Messages').select({
+            // Buscamos por número limpio para evitar fallos si uno tiene + y el otro no
+            filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, 
+            sort: [{ field: "timestamp", direction: "asc" }]
+        }).all();
+        socket.emit('conversation_history', records.map(r => ({
+            text: (r.get('text') as string) || "",
+            sender: (r.get('sender') as string) || "",
+            timestamp: (r.get('timestamp') as string) || "",
+            type: (r.get('type') as string) || "text",
+            mediaId: (r.get('media_id') as string) || "" 
+        })));
+      } catch(e) { console.error(e); }
     }
   });
 
   socket.on('update_contact_info', async (data) => {
       if(base) {
-          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${data.phone}'`, maxRecords: 1 }).firstPage();
+          const cleanPhone = cleanNumber(data.phone);
+          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage();
           if (records.length > 0) {
               await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true });
               io.emit('contact_updated_notification');
@@ -245,7 +239,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chatMessage', async (msg) => {
-    const targetPhone = msg.targetPhone || process.env.TEST_TARGET_PHONE;
+    const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); // LIMPIEZA AQUÍ TAMBIÉN
     if (waToken && waPhoneId) {
        try {
          await axios.post(
