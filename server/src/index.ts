@@ -38,7 +38,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// ... (RUTAS API MEDIA/UPLOAD/WEBHOOK IGUAL QUE ANTES) ...
+// --- RUTA: TUNEL MEDIA ---
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     if (!waToken) return res.sendStatus(500);
@@ -52,6 +52,7 @@ app.get('/api/media/:id', async (req, res) => {
     } catch (e) { res.sendStatus(404); }
 });
 
+// --- SUBIDA ARCHIVOS ---
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     const file = req.file;
@@ -67,7 +68,6 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     const formData = new FormData();
     formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
     formData.append('messaging_product', 'whatsapp');
-
     const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } });
     const mediaId = uploadRes.data.id;
 
@@ -78,8 +78,10 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
 
     await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { headers: { Authorization: `Bearer ${waToken}` } });
 
-    let textLog = file.originalname; let saveType = 'document';
-    if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; } else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; }
+    let textLog = file.originalname;
+    let saveType = 'document';
+    if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; }
+    else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; }
 
     await saveAndEmitMessage({ text: textLog, sender: senderName, recipient: cleanTarget, timestamp: new Date().toISOString(), type: saveType, mediaId: mediaId });
     await handleContactUpdate(cleanTarget, `Tú (${senderName}): 📎 Archivo`);
@@ -87,6 +89,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
   } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); }
 });
 
+// --- WEBHOOK ---
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']);
   else res.sendStatus(403);
@@ -109,6 +112,7 @@ app.post('/webhook', async (req, res) => {
   } catch (e) { res.sendStatus(500); }
 });
 
+// --- HELPERS ---
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
@@ -138,7 +142,7 @@ async function saveAndEmitMessage(msg: any) {
 
 // --- SOCKET.IO ---
 io.on('connection', (socket) => {
-  // Gestión Agentes (Igual que antes)
+  // Agentes
   socket.on('request_agents', async () => {
     if (base) {
         try {
@@ -151,7 +155,7 @@ io.on('connection', (socket) => {
         } catch (e) { console.error(e); }
     }
   });
-  socket.on('login_attempt', async (data) => { /* ... lógica de login igual ... */
+  socket.on('login_attempt', async (data) => { /* login */
       if(!base) return;
       try {
           const records = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage();
@@ -162,7 +166,7 @@ io.on('connection', (socket) => {
           } else { socket.emit('login_error', 'Usuario no encontrado'); }
       } catch (e) { socket.emit('login_error', 'Error servidor'); }
   });
-  socket.on('create_agent', async (data) => { /* ... lógica crear igual ... */
+  socket.on('create_agent', async (data) => { /* create */
       if (!base) return;
       const { newAgent, adminPassword } = data; 
       try {
@@ -187,7 +191,7 @@ io.on('connection', (socket) => {
           socket.emit('action_success', 'Perfil creado');
       } catch (e) { console.error("Error creating:", e); }
   });
-  socket.on('delete_agent', async (data) => { /* ... lógica borrar igual ... */
+  socket.on('delete_agent', async (data) => { /* delete */
       if (!base) return;
       const { agentId, adminPassword } = data;
       try {
@@ -202,22 +206,34 @@ io.on('connection', (socket) => {
       } catch (e) { console.error(e); }
   });
 
-  // NUEVO: Enviamos 'assigned_to' al pedir contactos
+  // --- CORRECCIÓN PRINCIPAL: REQUEST_CONTACTS ---
   socket.on('request_contacts', async () => {
     if (base) {
       try {
         const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all();
         socket.emit('contacts_update', records.map(r => {
             const avatarField = r.get('avatar') as any[];
+            
+            // SANITIZACIÓN: Aseguramos que last_message sea un texto limpio
+            let rawMsg = r.get('last_message');
+            let cleanMsg = "";
+            
+            if (typeof rawMsg === 'string') {
+                cleanMsg = rawMsg;
+            } else if (Array.isArray(rawMsg) && rawMsg.length > 0) {
+                cleanMsg = String(rawMsg[0]); // Si es Lookup, coge el primero
+            } else if (rawMsg) {
+                cleanMsg = String(rawMsg); // Intento final de conversión
+            }
+
             return {
               id: r.id,
               phone: (r.get('phone') as string) || "",
               name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido",
               status: (r.get('status') as string) || "Nuevo",
               department: (r.get('department') as string) || "",
-              // AÑADIDO: Enviamos quién tiene asignado el chat
-              assigned_to: (r.get('assigned_to') as string) || "", 
-              last_message: (r.get('last_message') as string) || "",
+              assigned_to: (r.get('assigned_to') as string) || "",
+              last_message: cleanMsg, // <--- CAMPO ARREGLADO
               last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(),
               avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null
             };
@@ -226,16 +242,27 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('request_conversation', async (phone) => { /* ... igual ... */
+  socket.on('request_conversation', async (phone) => {
     if (base) {
-      const records = await base('Messages').select({ filterByFormula: `OR({sender} = '${cleanNumber(phone)}', {recipient} = '${cleanNumber(phone)}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all();
-      socket.emit('conversation_history', records.map(r => ({ text: (r.get('text') as string) || "", sender: (r.get('sender') as string) || "", timestamp: (r.get('timestamp') as string) || "", type: (r.get('type') as string) || "text", mediaId: (r.get('media_id') as string) || "" })));
+      const cleanPhone = cleanNumber(phone);
+      const records = await base('Messages').select({
+        filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, 
+        sort: [{ field: "timestamp", direction: "asc" }]
+      }).all();
+      socket.emit('conversation_history', records.map(r => ({
+        text: (r.get('text') as string) || "",
+        sender: (r.get('sender') as string) || "",
+        timestamp: (r.get('timestamp') as string) || "",
+        type: (r.get('type') as string) || "text",
+        mediaId: (r.get('media_id') as string) || "" 
+      })));
     }
   });
 
-  socket.on('update_contact_info', async (data) => { /* ... igual ... */
+  socket.on('update_contact_info', async (data) => {
       if(base) {
-          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanNumber(data.phone)}'`, maxRecords: 1 }).firstPage();
+          const cleanPhone = cleanNumber(data.phone);
+          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage();
           if (records.length > 0) {
               await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true });
               io.emit('contact_updated_notification');
@@ -243,11 +270,15 @@ io.on('connection', (socket) => {
       }
   });
 
-  socket.on('chatMessage', async (msg) => { /* ... igual ... */
+  socket.on('chatMessage', async (msg) => {
     const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE);
     if (waToken && waPhoneId) {
        try {
-         await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } });
+         await axios.post(
+           `https://graph.facebook.com/v17.0/${waPhoneId}/messages`,
+           { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
+           { headers: { Authorization: `Bearer ${waToken}` } }
+         );
          await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() });
          await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`);
        } catch (error: any) { console.error("Error envío:", error.message); }
