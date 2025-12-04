@@ -24,7 +24,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
-  // Estados para el CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -58,7 +57,8 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   useEffect(() => {
     const handleHistory = (history: Message[]) => setMessages(history);
     const handleNewMessage = (msg: any) => {
-        if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
+        // Aceptamos mensajes del cliente, o mensajes enviados por CUALQUIER agente a este cliente
+        if (msg.sender === contact.phone || msg.recipient === contact.phone) {
             setMessages((prev) => [...prev, msg]);
         }
     };
@@ -78,7 +78,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     if (input.trim()) {
       const msg = { 
           text: input, 
-          sender: user.username, 
+          sender: user.username, // Enviamos TU nombre real
           targetPhone: contact.phone,
           timestamp: new Date().toISOString(), 
           type: 'text'
@@ -123,13 +123,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       }
   };
 
-  // --- SUBIDA ARCHIVOS ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
         formData.append('file', file);
         formData.append('targetPhone', contact.phone);
-        formData.append('senderName', user.username);
+        formData.append('senderName', user.username); // Enviamos TU nombre
 
         try {
             const response = await fetch(`${API_URL}/api/upload`, {
@@ -156,8 +155,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
-      const updates: any = {};
-      updates[field] = value;
+      const updates: any = {}; updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
 
@@ -207,37 +205,38 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
           const isMe = m.sender !== contact.phone; 
           return (
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
-                
-                {/* LÓGICA DE VISUALIZACIÓN */}
-                {m.type === 'image' && m.mediaId ? (
-                    <div className="mb-1 group relative">
-                        <img 
-                            src={`${API_URL}/api/media/${m.mediaId}`} 
-                            alt="Imagen" 
-                            className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90 transition bg-black/5"
-                            onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }}
-                        />
-                    </div>
-                ) : m.type === 'audio' && m.mediaId ? (
-                    <div className="flex items-center gap-2 min-w-[240px]">
-                        <audio controls src={`${API_URL}/api/media/${m.mediaId}`} className="h-8 w-full" />
-                    </div>
-                ) : m.type === 'document' && m.mediaId ? (
-                    // 📄 VISUALIZACIÓN DE DOCUMENTO
-                    <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
-                        <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
-                        <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-slate-700 truncate">{m.text}</p>
-                            <p className="text-xs text-slate-400">Documento</p>
-                        </div>
-                        <a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-5 h-5" /></a>
-                    </div>
-                ) : (
-                    <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
+              <div className={`flex flex-col max-w-[75%]`}>
+                {/* ETIQUETA DE NOMBRE DEL AGENTE */}
+                {isMe && (
+                    <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">
+                        {m.sender === 'Agente' ? 'Yo' : m.sender}
+                    </span>
                 )}
 
-                <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
+                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
+                    {/* CONTENIDO DEL MENSAJE */}
+                    {m.type === 'image' && m.mediaId ? (
+                        <div className="mb-1 group relative">
+                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
+                        </div>
+                    ) : m.type === 'audio' && m.mediaId ? (
+                        <div className="flex items-center gap-2 min-w-[240px]">
+                            <audio controls src={`${API_URL}/api/media/${m.mediaId}`} className="h-8 w-full" />
+                        </div>
+                    ) : m.type === 'document' && m.mediaId ? (
+                        <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
+                            <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
+                            <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-slate-700 truncate">{m.text}</p>
+                                <p className="text-xs text-slate-400">Documento</p>
+                            </div>
+                            <a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-5 h-5" /></a>
+                        </div>
+                    ) : (
+                        <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
+                    )}
+                    <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
+                </div>
               </div>
             </div>
           );

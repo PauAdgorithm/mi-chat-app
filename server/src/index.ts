@@ -107,7 +107,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
 
     await saveAndEmitMessage({
         text: textLog, 
-        sender: "Agente", 
+        sender: "msg.sender", 
         recipient: targetPhone,
         timestamp: new Date().toISOString(),
         type: msgType,
@@ -247,7 +247,7 @@ io.on('connection', (socket) => {
            { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
            { headers: { Authorization: `Bearer ${waToken}` } }
          );
-         await saveAndEmitMessage({ text: msg.text, sender: "Agente", recipient: targetPhone, timestamp: new Date().toISOString() });
+         await saveAndEmitMessage({ text: msg.text, sender: "msg.sender", recipient: targetPhone, timestamp: new Date().toISOString() });
          await handleContactUpdate(targetPhone, `Tú: ${msg.text}`);
        } catch (error: any) { console.error("Error envío:", error.message); }
     }
