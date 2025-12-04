@@ -1,11 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download } from 'lucide-react';
 import { Contact } from './Sidebar';
-
-// ----------------------------------------------------------------------
-// ⚠️ IMPORTANTE: Descomenta la siguiente línea en tu proyecto local:
-// import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
-// ----------------------------------------------------------------------
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 
 interface ChatWindowProps {
   socket: any;
@@ -113,7 +109,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         mediaRecorder.start();
         setIsRecording(true);
     } catch (error) {
-        console.error("Error micrófono:", error);
+        console.error("Error microfono:", error);
         alert("No se pudo acceder al micrófono.");
     }
   };
@@ -140,7 +136,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             if (!response.ok) throw new Error('Error subiendo archivo');
         } catch (error) {
             console.error(error);
-            alert("Error al enviar el archivo.");
+            alert("Error al enviar el archivo (formato no soportado por WhatsApp o error de red).");
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -151,12 +147,9 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
   };
 
-  // ⚠️ DESCOMENTAR EN LOCAL:
-  /*
   const onEmojiClick = (emojiData: EmojiClickData) => {
     setInput((prev) => prev + emojiData.emoji);
   };
-  */
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
@@ -177,7 +170,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       )}
 
-      {/* BARRA SUPERIOR CRM */}
+      {/* BARRA SUPERIOR */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -197,7 +190,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* ÁREA MENSAJES */}
+      {/* CHAT */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -212,13 +205,12 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[75%] p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                 
-                {/* LÓGICA DE VISUALIZACIÓN */}
                 {m.type === 'image' && m.mediaId ? (
                     <div className="mb-1 group relative">
                         <img 
                             src={`${API_URL}/api/media/${m.mediaId}`} 
                             alt="Imagen" 
-                            className="rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer hover:opacity-90"
+                            className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 bg-black/5"
                             onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }}
                         />
                     </div>
@@ -227,24 +219,13 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         <audio controls src={`${API_URL}/api/media/${m.mediaId}`} className="h-8 w-full" />
                     </div>
                 ) : m.type === 'document' && m.mediaId ? (
-                    // 📄 VISUALIZACIÓN DE DOCUMENTO
                     <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
-                        <div className="bg-red-100 p-2 rounded-full text-red-500">
-                            <FileText className="w-6 h-6" />
-                        </div>
+                        <div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div>
                         <div className="flex-1 min-w-0">
                             <p className="font-semibold text-slate-700 truncate">{m.text}</p>
                             <p className="text-xs text-slate-400">Documento</p>
                         </div>
-                        <a 
-                            href={`${API_URL}/api/media/${m.mediaId}`} 
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"
-                            title="Descargar"
-                        >
-                            <Download className="w-5 h-5" />
-                        </a>
+                        <a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-5 h-5" /></a>
                     </div>
                 ) : (
                     <p className="whitespace-pre-wrap">{String(m.text || "")}</p>
@@ -258,26 +239,24 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* EMOJI PICKER */}
+      {/* EMOJIS */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            {/* ⚠️ DESCOMENTAR EN LOCAL: */}
-            {/* <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /> */}
-            <div className="bg-white p-4 rounded text-xs text-red-500">Activa el EmojiPicker en código.</div>
+            <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
         </div>
       )}
 
       {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
-          {/* Input file sin restricción de tipo */}
+          {/* CAMBIO CLAVE: Quitamos accept="image/*" para permitir todo */}
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar archivo">
             <Paperclip className="w-5 h-5" />
           </button>
           
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none text-sm transition-all ${isRecording ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' : 'bg-slate-50 border-slate-200 focus:border-blue-300'}`} />
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando audio..." : "Escribe un mensaje..."} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
           <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
             <Smile className="w-5 h-5" />
