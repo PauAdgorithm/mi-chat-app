@@ -17,33 +17,53 @@ interface Message {
   mediaId?: string;
 }
 
-// --- REPRODUCTOR DE AUDIO ---
+// --- REPRODUCTOR DE AUDIO "PREMIUM" (Diseño 2 filas) ---
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null); // Guardamos URL blob
-  const [error, setError] = useState(false);
+  
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // Descargar el blob para evitar errores de streaming
   useEffect(() => {
-    // Descargar audio al montar para evitar problemas de stream
     fetch(src)
-        .then(res => res.blob())
-        .then(blob => {
-            const url = URL.createObjectURL(blob);
-            setAudioUrl(url);
-        })
-        .catch(() => setError(true));
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        setIsReady(true);
+      })
+      .catch(e => console.error("Error audio", e));
   }, [src]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [playbackRate, volume, isMuted]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (isPlaying) audio.pause(); else audio.play();
+    if (isPlaying) audio.pause();
+    else audio.play();
     setIsPlaying(!isPlaying);
+  };
+
+  const toggleSpeed = () => {
+    const speeds = [1, 1.25, 1.5, 2];
+    const next = speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length];
+    setPlaybackRate(next);
   };
 
   const onTimeUpdate = () => {
@@ -53,30 +73,91 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
     setProgress((audio.currentTime / (audio.duration || 1)) * 100);
   };
 
+  const onLoadedMetadata = (e: any) => {
+    setDuration(e.currentTarget.duration);
+  };
+
   const onEnded = () => { setIsPlaying(false); setProgress(0); setCurrentTime(0); };
 
-  if (error) return <div className="text-xs text-red-500 px-2">Error carga</div>;
-  if (!audioUrl) return <div className="text-xs text-slate-500 px-2 animate-pulse">Cargando...</div>;
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const newTime = (Number(e.target.value) / 100) * duration;
+    audio.currentTime = newTime;
+    setProgress(Number(e.target.value));
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
+    const min = Math.floor(time / 60);
+    const sec = Math.floor(time % 60);
+    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
+  if (!isReady) return <div className="text-xs text-slate-400 p-2">Cargando audio...</div>;
 
   return (
-    <div className={`flex items-center gap-2 p-2 rounded-xl min-w-[250px] select-none transition-colors ${isMe ? 'bg-green-200' : 'bg-gray-100'}`}>
-      <audio ref={audioRef} src={audioUrl} onTimeUpdate={onTimeUpdate} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onEnded={onEnded} className="hidden" />
-      <button onClick={togglePlay} className={`p-2 rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-green-600 text-white' : 'bg-slate-500 text-white'}`}>
-        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+    <div className={`flex items-start gap-3 p-3 rounded-xl min-w-[300px] max-w-[400px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}>
+      <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" />
+      
+      {/* 1. BOTÓN PLAY GRANDE (IZQUIERDA) */}
+      <button 
+        onClick={togglePlay}
+        className={`w-11 h-11 mt-1 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}
+      >
+        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
       </button>
-      <div className="flex-1 mx-1">
-        <div className="h-1 bg-black/10 rounded-full overflow-hidden">
-            <div className="h-full bg-current transition-all" style={{ width: `${progress}%` }} />
+
+      {/* 2. COLUMNA DERECHA (BARRA + CONTROLES) */}
+      <div className="flex-1 flex flex-col gap-1 w-full min-w-0">
+        
+        {/* BARRA DE PROGRESO (GRANDE) */}
+        <div className="h-5 flex items-center">
+            <input
+            type="range"
+            min="0"
+            max="100"
+            value={progress}
+            onChange={handleSeek}
+            className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`}
+            />
+        </div>
+
+        {/* FILA INFERIOR: TIEMPO + CONTROLES */}
+        <div className="flex justify-between items-center text-[11px] font-medium text-slate-500 h-5">
+            
+            {/* TIEMPO (Dinámico) */}
+            <span className="font-mono tabular-nums">
+                {currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}
+            </span>
+            
+            {/* CONTROLES MINI (Derecha) */}
+            <div className="flex items-center gap-3">
+                {/* Velocidad */}
+                <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 hover:bg-black/10 rounded text-[10px] font-bold transition min-w-[24px] text-center">
+                    {playbackRate}x
+                </button>
+
+                {/* Volumen */}
+                <div className="relative flex items-center group" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}>
+                    <button onClick={toggleMute} className="hover:text-slate-800 transition">
+                        {isMuted || volume === 0 ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    </button>
+                    {/* Slider Flotante */}
+                    <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 transition-all duration-200 z-20 ${showVolumeSlider ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+                        <div className="h-16 w-4 flex items-center justify-center">
+                            <input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg cursor-pointer accent-blue-600" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Descargar (Salvavidas) */}
+                <a href={src} download="audio.webm" target="_blank" rel="noopener noreferrer" className="hover:text-slate-800 transition" title="Descargar">
+                    <Download className="w-3.5 h-3.5" />
+                </a>
+            </div>
         </div>
       </div>
-      <div className="text-[10px] font-mono text-slate-600 w-[35px] text-right">
-        {Math.floor(currentTime / 60)}:{Math.floor(currentTime % 60).toString().padStart(2, '0')}
-      </div>
-      
-      {/* BOTÓN DE DESCARGA (SALVAVIDAS) */}
-      <a href={src} download="audio.webm" target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-black/5 rounded-full transition" title="Descargar si no se oye">
-        <Download className="w-4 h-4" />
-      </a>
     </div>
   );
 };
@@ -107,6 +188,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   useEffect(() => {
     setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
     setMessages([]);
+    setShowEmojiPicker(false); setIsRecording(false);
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
 
@@ -136,7 +218,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         let mimeType = 'audio/webm';
-        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; // Safari prefiere MP4
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
@@ -179,7 +261,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             <img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
-      {/* BARRA SUPERIOR */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -198,7 +279,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             </select>
         </div>
       </div>
-      {/* CHAT */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -216,10 +296,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                         {m.sender === 'Agente' ? 'Yo' : m.sender}
                     </span>
                 )}
-                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
+                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-[#d9fdd3] rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                     {m.type === 'image' && m.mediaId ? (
                         <div className="mb-1 group relative">
-                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
+                            <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[280px] max-h-[280px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
                         <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
