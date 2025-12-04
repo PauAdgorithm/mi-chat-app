@@ -180,9 +180,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
+  // Estados para el CRM
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -203,7 +205,10 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     setMessages([]);
     setShowEmojiPicker(false);
     setIsRecording(false);
-    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
+    
+    if (socket && contact.phone) {
+        socket.emit('request_conversation', contact.phone);
+    }
   }, [contact, socket]);
 
   useEffect(() => {
@@ -213,6 +218,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
             setMessages((prev) => [...prev, msg]);
         }
     };
+    
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
@@ -227,8 +233,11 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     e.preventDefault();
     if (input.trim()) {
       const msg = { 
-          text: input, sender: user.username, targetPhone: contact.phone,
-          timestamp: new Date().toISOString(), type: 'text'
+          text: input, 
+          sender: user.username, 
+          targetPhone: contact.phone,
+          timestamp: new Date().toISOString(), 
+          type: 'text'
       };
       socket.emit('chatMessage', msg);
       setInput('');
@@ -236,25 +245,31 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
     }
   };
 
+  // --- AUDIO ---
   const startRecording = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        let mimeType = 'audio/webm';
-        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
-        const mediaRecorder = new MediaRecorder(stream, { mimeType });
+        const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
-        mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
+
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-            const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
-            const audioFile = new File([audioBlob], `voice_note.${ext}`, { type: mimeType });
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            const audioFile = new File([audioBlob], "voice_note.webm", { type: 'audio/webm' });
             await uploadFile(audioFile);
             stream.getTracks().forEach(track => track.stop());
         };
+
         mediaRecorder.start();
         setIsRecording(true);
-    } catch (error: any) { alert(`Error micrófono: ${error.message}`); }
+    } catch (error) {
+        console.error("Error microfono:", error);
+        alert("No se pudo acceder al micrófono.");
+    }
   };
 
   const stopRecording = () => {
@@ -264,34 +279,50 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
       }
   };
 
+  // --- SUBIDA ARCHIVOS ---
   const uploadFile = async (file: File) => {
         setIsUploading(true);
         const formData = new FormData();
         formData.append('file', file);
         formData.append('targetPhone', contact.phone);
         formData.append('senderName', user.username);
+
         try {
-            await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData });
-        } catch (error) { alert("Error envio"); } 
-        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+            const response = await fetch(`${API_URL}/api/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) throw new Error('Error subiendo archivo');
+        } catch (error) {
+            console.error(error);
+            alert("Error al enviar el archivo.");
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]);
   };
 
-  const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
+  const onEmojiClick = (emojiData: EmojiClickData) => {
+    setInput((prev) => prev + emojiData.emoji);
+  };
 
   const updateCRM = (field: string, value: string) => {
       if (!socket) return;
-      const updates: any = {}; updates[field] = value;
+      const updates: any = {};
+      updates[field] = value;
       socket.emit('update_contact_info', { phone: contact.phone, updates: updates });
   };
+
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
       
+      {/* LIGHTBOX */}
       {selectedImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}>
             <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button>
@@ -299,6 +330,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       )}
 
+      {/* BARRA SUPERIOR CRM */}
       <div className="bg-white border-b border-gray-200 p-3 flex gap-3 items-center shadow-sm z-10 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 flex-1 min-w-[150px] bg-slate-50 px-2 rounded-md border border-slate-200">
             <User className="w-4 h-4 text-slate-400" />
@@ -318,6 +350,7 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         </div>
       </div>
 
+      {/* ÁREA DE MENSAJES */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
@@ -344,7 +377,6 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
                             <img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-[200px] max-h-[200px] w-auto h-auto object-contain cursor-pointer hover:opacity-90 transition bg-black/5" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} />
                         </div>
                     ) : m.type === 'audio' && m.mediaId ? (
-                        // USAMOS EL REPRODUCTOR PRO
                         <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                     ) : m.type === 'document' && m.mediaId ? (
                         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[200px]">
@@ -367,12 +399,14 @@ export function ChatWindow({ socket, user, contact }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* EMOJI PICKER */}
       {showEmojiPicker && (
         <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} />
         </div>
       )}
 
+      {/* INPUT */}
       <div className="p-3 bg-white border-t border-slate-200 relative z-20">
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
