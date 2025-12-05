@@ -9,6 +9,9 @@ interface ChatWindowProps {
   contact: Contact;
   config?: { departments: string[]; statuses: string[]; };
   onBack: () => void;
+  // NUEVOS PROPS
+  onlineUsers: string[];
+  typingInfo: { [chatId: string]: string };
 }
 
 interface Message {
@@ -35,7 +38,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   return ( <div className={`flex items-start gap-2 p-2 rounded-xl w-full max-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}> <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" /> <button onClick={togglePlay} className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 mt-0.5 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}> {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />} </button> <div className="flex-1 flex flex-col gap-1 w-full min-w-0"> <div className="h-5 flex items-center"><input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`} /></div> <div className="flex justify-between items-center text-[10px] font-medium text-slate-500 h-5 w-full"> <span className="font-mono tabular-nums min-w-[35px]">{currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}</span> <div className="flex items-center gap-2"> <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 rounded text-[9px] font-bold min-w-[22px] text-center">{playbackRate}x</button> <div className="relative flex items-center group hidden sm:flex" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}> <button onClick={toggleMute} className="p-1 hover:text-slate-800"><Volume2 className="w-3.5 h-3.5" /></button> {showVolumeSlider && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 z-20"><div className="h-16 w-4 flex items-center justify-center"><input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div></div>} </div> <a href={src} download="audio.webm" target="_blank" rel="noreferrer" className="p-1 hover:bg-black/5 rounded-full"><Download className="w-3.5 h-3.5" /></a> </div> </div> </div> </div> );
 };
 
-export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindowProps) {
+export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -46,9 +49,8 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  // ESTADOS NUEVOS: Control de quién escribe
-  const [typingUser, setTypingUser] = useState<string | null>(null);
-  const typingTimeoutRef = useRef<any>(null);
+  // LOGICA TYPING NUEVA: Usamos 'typingInfo' que viene de App.tsx en lugar de listener local
+  const typingUser = typingInfo[contact.phone] || null;
   const lastTypingTimeRef = useRef<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -65,8 +67,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   useEffect(() => {
     setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
     setMessages([]); setShowEmojiPicker(false); setIsRecording(false);
-    // Limpiamos el estado de escribiendo al cambiar de chat
-    setTypingUser(null);
+    
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
 
@@ -75,51 +76,28 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     const handleNewMessage = (msg: any) => {
         if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
             setMessages((prev) => [...prev, msg]);
-            setTypingUser(null); // Si llega mensaje, quitar "escribiendo"
         }
     };
     
-    // NUEVO: Escuchar evento del servidor con LOGS
-    const handleRemoteTyping = (data: { user: string, phone: string }) => {
-        // Log para depuración: Abre la consola (F12) para ver esto
-        console.log("🔔 Evento Typing recibido:", data);
-        console.log("ℹ️ Mi usuario:", user.username, "| Chat actual:", contact.phone);
-
-        // La clave es que el 'phone' del evento coincida con el contacto abierto
-        if (data.phone === contact.phone && data.user !== user.username) {
-            console.log("✅ Coincide! Mostrando indicador...");
-            setTypingUser(data.user);
-            
-            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            typingTimeoutRef.current = setTimeout(() => {
-                setTypingUser(null);
-            }, 3000);
-        } else {
-            console.log("❌ No coincide o soy yo mismo.");
-        }
-    };
+    // NOTA: Hemos eliminado el listener 'remote_typing' de aquí porque ahora se maneja en App.tsx y nos llega por props
 
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        socket.on('remote_typing', handleRemoteTyping);
         
         return () => { 
             socket.off('conversation_history', handleHistory); 
             socket.off('message', handleNewMessage); 
-            socket.off('remote_typing', handleRemoteTyping);
         };
     }
-  }, [socket, contact.phone, user.username]);
+  }, [socket, contact.phone]);
 
-  // NUEVO: Función que emite el evento al servidor
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
       
       const now = Date.now();
       // Emitir evento con debounce de 2 segundos
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
-          console.log("📤 Enviando Typing para:", contact.phone);
           socket.emit('typing', { user: user.username, phone: contact.phone });
           lastTypingTimeRef.current = now;
       }
@@ -130,7 +108,6 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     if (input.trim()) {
       const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: 'text' };
       socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false);
-      setTypingUser(null);
     }
   };
 
@@ -142,6 +119,9 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
+  // CALCULAR ESTADO DE CABECERA
+  const isOnline = onlineUsers.includes(contact.phone);
+  
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
@@ -149,22 +129,33 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
         
-        {/* Nombre y Estado Escribiendo */}
+        {/* CABECERA CON ESTADO ONLINE/TYPING */}
         <div className="flex flex-col flex-1 min-w-[140px]">
             <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                 <User className="w-4 h-4 text-slate-400" />
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
             </div>
             
-            {/* NUEVO: Indicador visual mejorado */}
-            <div className={`overflow-hidden transition-all duration-300 ${typingUser ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-                <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            {/* LÓGICA DE ESTADO: Prioridad Escribiendo > Online > Nada */}
+            <div className="mt-1 h-5 flex items-center">
+                {typingUser ? (
+                    <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+                         <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        {typingUser} está escribiendo...
                     </span>
-                    {typingUser} está escribiendo...
-                </span>
+                ) : isOnline ? (
+                    <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                        En línea
+                    </span>
+                ) : (
+                    <span className="text-[10px] text-slate-400">
+                        {/* Espacio reservado o última conexión */}
+                    </span>
+                )}
             </div>
         </div>
         
@@ -172,7 +163,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
         <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
       </div>
 
-      {/* ÁREA DE CHAT - FONDO ARREGLADO (Color sólido suave) */}
+      {/* ÁREA DE CHAT */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
         {messages.map((m, i) => {
@@ -200,7 +191,6 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
           
-          {/* NUEVO: Ahora usamos handleInputChange en lugar de setInput directo */}
           <input type="text" value={input} onChange={handleInputChange} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : "Mensaje"} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
           <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
