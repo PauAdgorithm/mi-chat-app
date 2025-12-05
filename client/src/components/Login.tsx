@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Lock, ArrowRight, RefreshCw, LogIn, CheckSquare, Square } from 'lucide-react';
+import { User, Lock, ArrowRight, RefreshCw, LogIn, CheckSquare, Square, Users } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (username: string, role: string, password: string, remember: boolean) => void;
@@ -18,14 +18,15 @@ export function Login({ onLogin, socket }: LoginProps) {
 
   useEffect(() => {
     if (socket) {
+        // Pedimos agentes
         socket.emit('request_agents');
+        
         socket.on('agents_list', (list: Agent[]) => {
             setAgents(list);
-            setLoading(false);
+            setLoading(false); // <--- Aquí quitamos el spinner solo cuando llegan datos
         });
-        socket.on('login_success', (user: any) => {
-            onLogin(user.username, user.role, passwordInput, rememberMe);
-        });
+        
+        socket.on('login_success', (user: any) => onLogin(user.username, user.role, passwordInput, rememberMe));
         socket.on('login_error', (msg: string) => setError(msg));
     }
   }, [socket, passwordInput, rememberMe]);
@@ -45,19 +46,34 @@ export function Login({ onLogin, socket }: LoginProps) {
         <h2 className="text-3xl font-bold text-slate-800">{selectedAgent ? `Hola, ${selectedAgent.name}` : 'Bienvenido'}</h2>
         <p className="text-slate-500 mt-2">Sistema de Gestión</p>
       </div>
+
       {!selectedAgent && (
-          <div className="w-full space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-              {loading ? <RefreshCw className="w-6 h-6 animate-spin mx-auto text-slate-400" /> : agents.map((agent) => (
-                  <button key={agent.id} onClick={() => { setSelectedAgent(agent); setError(''); setPasswordInput(''); }} className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left">
-                      <div className="flex items-center gap-3"><div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold ${agent.role === 'Admin' ? 'bg-purple-600' : 'bg-blue-500'}`}>{agent.name.charAt(0).toUpperCase()}</div><div><h3 className="font-bold text-slate-700">{agent.name}</h3><span className="text-xs text-slate-400">{agent.role}</span></div></div>
-                      <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                  </button>
-              ))}
-              {agents.length === 0 && !loading && <div className="text-center text-slate-400 italic border-2 border-dashed border-slate-200 p-4 rounded-lg">No hay agentes. Crea uno desde el panel de control (cuando entres como Admin).</div>}
+          <div className="w-full space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2 relative min-h-[200px]">
+              {loading ? (
+                  // SPINNER MEJORADO Y CENTRADO
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                      <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mb-3" />
+                      <p className="text-sm font-medium">Conectando con servidor...</p>
+                  </div>
+              ) : agents.length === 0 ? (
+                  <div className="text-center text-slate-400 italic border-2 border-dashed border-slate-200 p-8 rounded-xl flex flex-col items-center">
+                      <Users className="w-8 h-8 mb-2 opacity-50"/>
+                      <p>No hay agentes.</p>
+                      <p className="text-xs mt-1">Crea el primer usuario (Admin) para empezar.</p>
+                  </div>
+              ) : (
+                  agents.map((agent) => (
+                      <button key={agent.id} onClick={() => { setSelectedAgent(agent); setError(''); setPasswordInput(''); }} className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left animate-in slide-in-from-bottom-2">
+                          <div className="flex items-center gap-3"><div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold ${agent.role === 'Admin' ? 'bg-purple-600' : 'bg-blue-500'}`}>{agent.name.charAt(0).toUpperCase()}</div><div><h3 className="font-bold text-slate-700">{agent.name}</h3><span className="text-xs text-slate-400">{agent.role}</span></div></div>
+                          <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 transition-transform group-hover:translate-x-1" />
+                      </button>
+                  ))
+              )}
           </div>
       )}
+
       {selectedAgent && (
-          <form onSubmit={handleLogin} className="w-full bg-white p-6 rounded-2xl shadow-lg border border-slate-100">
+          <form onSubmit={handleLogin} className="w-full bg-white p-6 rounded-2xl shadow-lg border border-slate-100 animate-in fade-in slide-in-from-right-4">
               {selectedAgent.hasPassword ? (<div className="mb-4"><label className="text-xs font-bold text-slate-500 uppercase">Contraseña</label><div className="relative mt-1"><Lock className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" /><input type="password" autoFocus value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full p-3 pl-10 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500" placeholder="••••••" /></div></div>) : <div className="mb-6 text-center p-4 bg-green-50 rounded-xl border border-green-100 text-green-700 text-sm font-medium">Acceso libre</div>}
               <div className="flex items-center gap-2 mb-4 cursor-pointer w-fit select-none" onClick={() => setRememberMe(!rememberMe)}>{rememberMe ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5 text-slate-400" />}<span className={`text-sm ${rememberMe ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>Mantener sesión iniciada</span></div>
               {error && <p className="text-xs text-red-500 mb-4 text-center">{error}</p>}

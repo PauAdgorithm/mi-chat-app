@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Ignorar builds de escritorio
+client/dist_desktop/
+client/dist/
+client/release/
+*.exe
+*.dmg
+*.zip
+node_modules
+.DS_Store
+dist
+dist_desktop
+win-unpacked
+release
+build
+.env

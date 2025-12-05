@@ -18,52 +18,46 @@ interface SidebarProps {
   socket: any;
   onSelectContact: (contact: Contact) => void;
   selectedContactId?: string;
+  isConnected?: boolean; // Nuevo prop para saber estado
 }
 
 type FilterType = 'all' | 'mine' | 'dept' | 'unassigned';
 
-export function Sidebar({ user, socket, onSelectContact, selectedContactId }: SidebarProps) {
+export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true }: SidebarProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Referencia para el sonido
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Efecto Maestro: Carga inicial y recarga al conectar
   useEffect(() => {
-    // Cargar sonido
-    audioRef.current = new Audio('/notification.mp3');
-
-    // Permisos notificación visual
-    if (Notification.permission !== 'granted') {
-        Notification.requestPermission();
+    // Si el socket se conecta (o reconecta), pedimos datos inmediatamente
+    if (socket && isConnected) {
+        console.log("🔄 Sidebar: Socket activo, pidiendo contactos...");
+        socket.emit('request_contacts');
     }
+  }, [socket, isConnected]); // Se ejecuta cada vez que 'isConnected' cambia a true
+
+  useEffect(() => {
+    audioRef.current = new Audio('/notification.mp3');
+    if (Notification.permission !== 'granted') Notification.requestPermission();
 
     if (!socket) return;
 
-    socket.on('contacts_update', (newContacts: any) => {
-      if (Array.isArray(newContacts)) {
-        setContacts(newContacts);
-      }
-    });
+    const handleContactsUpdate = (newContacts: any) => {
+      if (Array.isArray(newContacts)) setContacts(newContacts);
+    };
 
-    socket.emit('request_contacts');
+    socket.on('contacts_update', handleContactsUpdate);
     socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
 
-    // --- GESTIÓN DE NOTIFICACIONES ---
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
-        
         if (!isMe) {
-            // Sonido
-            audioRef.current?.play().catch(e => console.log("Audio bloqueado hasta interacción"));
-            
-            // Visual
+            audioRef.current?.play().catch(() => {});
             if (Notification.permission === 'granted' && document.hidden) {
-                new Notification(`Mensaje de ${msg.sender}`, {
-                    body: msg.text,
-                    icon: '/vite.svg'
-                });
+                new Notification(`Mensaje de ${msg.sender}`, { body: msg.text, icon: '/vite.svg' });
             }
         }
         socket.emit('request_contacts');
@@ -71,32 +65,29 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
 
     socket.on('message', handleNewMessageNotification);
 
-    const interval = setInterval(() => socket.emit('request_contacts'), 5000);
+    // Polling de seguridad (cada 10s es suficiente, 5s satura)
+    const interval = setInterval(() => {
+        if(isConnected) socket.emit('request_contacts');
+    }, 10000);
 
     return () => {
-      socket.off('contacts_update');
+      socket.off('contacts_update', handleContactsUpdate);
       socket.off('contact_updated_notification');
       socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
-  }, [socket, user.username]);
+  }, [socket, user.username, isConnected]);
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
   };
 
-  const getInitial = (name?: any, phone?: any) => {
-    const text = String(name || phone || "?");
-    return text.charAt(0).toUpperCase();
-  };
+  const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
 
   const cleanMessagePreview = (msg: any) => {
     if (!msg) return "Haz clic para ver";
-    if (typeof msg === 'string') {
-        if (msg === '[object Object]') return "Mensaje"; 
-        return msg;
-    }
+    if (typeof msg === 'string') return msg.includes('[object Object]') ? "Mensaje" : msg;
     if (typeof msg === 'object') return "Mensaje";
     return String(msg);
   };
@@ -114,7 +105,10 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       <div className="p-4 border-b border-gray-200 bg-white">
-        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bandeja de Entrada</h2>
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
+            Bandeja de Entrada
+            {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
+        </h2>
         <div className="relative"><Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" /><input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" /></div>
         <div className="flex gap-1 mt-3 p-1 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar">
             <button onClick={() => setFilter('all')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
@@ -123,7 +117,15 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {filteredContacts.length === 0 ? <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center"><RefreshCw className="w-5 h-5 animate-spin text-blue-400 mb-2" /><p>No hay chats aquí.</p></div> : (
+        {filteredContacts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
+                {/* Loader suave */}
+                <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
+                    <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />
+                </div>
+                <p>{isConnected ? "Cargando chats..." : "Esperando conexión..."}</p>
+            </div>
+        ) : (
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => (
               <li key={contact.id || Math.random()}>
