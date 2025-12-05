@@ -19,7 +19,6 @@ interface Message {
   mediaId?: string;
 }
 
-// Componente de Audio (Sin cambios, mantenemos tu lógica original)
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false); const [progress, setProgress] = useState(0); const [duration, setDuration] = useState(0); const [currentTime, setCurrentTime] = useState(0); const [playbackRate, setPlaybackRate] = useState(1); const [volume, setVolume] = useState(1); const [isMuted, setIsMuted] = useState(false); const [showVolumeSlider, setShowVolumeSlider] = useState(false); const [audioUrl, setAudioUrl] = useState<string | null>(null); const [isReady, setIsReady] = useState(false); const audioRef = useRef<HTMLAudioElement>(null);
   useEffect(() => { fetch(src).then(r => r.blob()).then(blob => { setAudioUrl(URL.createObjectURL(blob)); setIsReady(true); }).catch(e => console.error(e)); }, [src]);
@@ -47,7 +46,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  // Estados para "Escribiendo..."
+  // ESTADOS NUEVOS: Control de quién escribe
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const lastTypingTimeRef = useRef<number>(0);
@@ -66,6 +65,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   useEffect(() => {
     setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
     setMessages([]); setShowEmojiPicker(false); setIsRecording(false);
+    // Limpiamos el estado de escribiendo al cambiar de chat
     setTypingUser(null);
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
@@ -75,17 +75,17 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     const handleNewMessage = (msg: any) => {
         if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
             setMessages((prev) => [...prev, msg]);
-            setTypingUser(null); // Al recibir mensaje, dejar de mostrar "escribiendo"
+            setTypingUser(null); // Si llega mensaje, quitar "escribiendo"
         }
     };
     
-    // Escuchar evento de escribiendo
+    // NUEVO: Escuchar evento del servidor
     const handleRemoteTyping = (data: { user: string, phone: string }) => {
-        // Solo mostrar si coincide con el teléfono del contacto actual y no soy yo mismo
+        // Solo mostramos si es en ESTE chat (por teléfono) y NO soy yo mismo
         if (data.phone === contact.phone && data.user !== user.username) {
             setTypingUser(data.user);
             
-            // Limpiar el estado después de 3 segundos
+            // Borrar el mensaje después de 3 segundos sin actividad
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = setTimeout(() => {
                 setTypingUser(null);
@@ -106,12 +106,12 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     }
   }, [socket, contact.phone, user.username]);
 
-  // Manejar Input para emitir "Escribiendo..." con control de frecuencia
+  // NUEVO: Función que emite el evento al servidor
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
       
       const now = Date.now();
-      // Emitir solo si han pasado más de 2000ms desde la última vez para no saturar
+      // Solo enviamos señal cada 2 segundos para no saturar
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
           lastTypingTimeRef.current = now;
@@ -123,7 +123,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     if (input.trim()) {
       const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: 'text' };
       socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false);
-      setTypingUser(null); // Limpiar mi estado local por si acaso
+      setTypingUser(null);
     }
   };
 
@@ -141,10 +141,15 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
 
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
+        
+        {/* Nombre y Estado Escribiendo */}
         <div className="flex flex-col flex-1 min-w-[140px]">
-            <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><User className="w-4 h-4 text-slate-400" /><input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} /></div>
+            <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
+                <User className="w-4 h-4 text-slate-400" />
+                <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
+            </div>
             
-            {/* INDICADOR VISUAL DE ESCRIBIENDO */}
+            {/* NUEVO: Aquí se muestra el indicador visual */}
             <div className={`h-4 overflow-hidden transition-all duration-300 ${typingUser ? 'opacity-100 mt-1' : 'opacity-0 h-0'}`}>
                 <span className="text-[11px] text-green-600 font-medium flex items-center gap-1">
                     <span className="relative flex h-2 w-2">
@@ -187,7 +192,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
           
-          {/* AQUÍ ESTABA LA CLAVE: El onChange llama a handleInputChange para emitir el evento */}
+          {/* NUEVO: Ahora usamos handleInputChange en lugar de setInput directo */}
           <input type="text" value={input} onChange={handleInputChange} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : "Mensaje"} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
           
           <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
