@@ -136,8 +136,11 @@ io.on('connection', (socket) => {
               const records = await base('Config').select().all();
               socket.emit('config_list', records.map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') })));
           } catch(e) { console.error(e); }
+          
       }
+      
   });
+  
 
   socket.on('add_config', async (data) => { 
       if (base) {
@@ -237,6 +240,19 @@ io.on('connection', (socket) => {
   socket.on('typing', (data) => {
     // Retransmitir evento a todos los demás clientes conectados
     socket.broadcast.emit('remote_typing', data);
+    
+  });
+  // ... resto de tu código de conexión ...
+
+  // AÑADIR ESTO PARA QUE FUNCIONE EL "ESCRIBIENDO..."
+  socket.on('typing', (data: any) => {
+    // Retransmitir a todos excepto al que escribe
+    socket.broadcast.emit('remote_typing', data);
+  });
+
+  // Manejo de desconexión (opcional, para depuración)
+  socket.on('disconnect', () => {
+    console.log('Usuario desconectado');
   });
 });
 

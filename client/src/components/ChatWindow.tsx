@@ -19,6 +19,7 @@ interface Message {
   mediaId?: string;
 }
 
+// Componente de Audio (Sin cambios, mantenemos tu lógica original)
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false); const [progress, setProgress] = useState(0); const [duration, setDuration] = useState(0); const [currentTime, setCurrentTime] = useState(0); const [playbackRate, setPlaybackRate] = useState(1); const [volume, setVolume] = useState(1); const [isMuted, setIsMuted] = useState(false); const [showVolumeSlider, setShowVolumeSlider] = useState(false); const [audioUrl, setAudioUrl] = useState<string | null>(null); const [isReady, setIsReady] = useState(false); const audioRef = useRef<HTMLAudioElement>(null);
   useEffect(() => { fetch(src).then(r => r.blob()).then(blob => { setAudioUrl(URL.createObjectURL(blob)); setIsReady(true); }).catch(e => console.error(e)); }, [src]);
@@ -46,9 +47,10 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  // --- NUEVO ESTADO PARA "ESCRIBIENDO..." ---
+  // Estados para "Escribiendo..."
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const typingTimeoutRef = useRef<any>(null);
+  const lastTypingTimeRef = useRef<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -73,16 +75,21 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     const handleNewMessage = (msg: any) => {
         if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) {
             setMessages((prev) => [...prev, msg]);
-            setTypingUser(null); // Borrar "escribiendo" al recibir mensaje
+            setTypingUser(null); // Al recibir mensaje, dejar de mostrar "escribiendo"
         }
     };
     
-    // NUEVO: Escuchar evento de otro usuario escribiendo
+    // Escuchar evento de escribiendo
     const handleRemoteTyping = (data: { user: string, phone: string }) => {
+        // Solo mostrar si coincide con el teléfono del contacto actual y no soy yo mismo
         if (data.phone === contact.phone && data.user !== user.username) {
             setTypingUser(data.user);
+            
+            // Limpiar el estado después de 3 segundos
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
+            typingTimeoutRef.current = setTimeout(() => {
+                setTypingUser(null);
+            }, 3000);
         }
     };
 
@@ -99,11 +106,15 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     }
   }, [socket, contact.phone, user.username]);
 
-  // Manejar Input + Emitir Typing
+  // Manejar Input para emitir "Escribiendo..." con control de frecuencia
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
-      if (socket) {
+      
+      const now = Date.now();
+      // Emitir solo si han pasado más de 2000ms desde la última vez para no saturar
+      if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
+          lastTypingTimeRef.current = now;
       }
   };
 
@@ -112,6 +123,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
     if (input.trim()) {
       const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: 'text' };
       socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false);
+      setTypingUser(null); // Limpiar mi estado local por si acaso
     }
   };
 
@@ -131,9 +143,19 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
         <div className="flex flex-col flex-1 min-w-[140px]">
             <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><User className="w-4 h-4 text-slate-400" /><input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} /></div>
-            {/* Indicador visual de escribiendo */}
-            {typingUser && <span className="text-[10px] text-green-600 animate-pulse ml-1 mt-1 font-medium">{typingUser} está escribiendo...</span>}
+            
+            {/* INDICADOR VISUAL DE ESCRIBIENDO */}
+            <div className={`h-4 overflow-hidden transition-all duration-300 ${typingUser ? 'opacity-100 mt-1' : 'opacity-0 h-0'}`}>
+                <span className="text-[11px] text-green-600 font-medium flex items-center gap-1">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    {typingUser} está escribiendo...
+                </span>
+            </div>
         </div>
+        
         <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
         <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
       </div>
@@ -164,7 +186,10 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
         <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
+          
+          {/* AQUÍ ESTABA LA CLAVE: El onChange llama a handleInputChange para emitir el evento */}
           <input type="text" value={input} onChange={handleInputChange} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : "Mensaje"} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
+          
           <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
           {input.trim() ? <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button> : <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'}`} title="Grabar"><Mic className="w-5 h-5" /></button>}
         </form>
