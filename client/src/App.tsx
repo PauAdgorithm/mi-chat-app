@@ -22,18 +22,20 @@ function App() {
   });
 
   useEffect(() => {
-    // 1. Recuperar sesión (Miramos en los dos sitios)
-    // Primero LocalStorage (Persistente)
-    let savedUser = localStorage.getItem('chatgorithm_user');
+    const savedUser = localStorage.getItem('chatgorithm_user');
+    let sessionUser = null;
     
-    // Si no está, miramos en SessionStorage (Temporal)
+    // Intentar recuperar de sessionStorage si no hay nada en local
     if (!savedUser) {
-        savedUser = sessionStorage.getItem('chatgorithm_user');
+        const session = sessionStorage.getItem('chatgorithm_user');
+        if (session) sessionUser = session;
+    } else {
+        sessionUser = savedUser;
     }
 
-    if (savedUser) {
+    if (sessionUser) {
         try {
-            const parsed = JSON.parse(savedUser);
+            const parsed = JSON.parse(sessionUser);
             setUser(parsed);
             socket.emit('login', { username: parsed.username });
         } catch (e) { console.error(e); }
@@ -52,52 +54,38 @@ function App() {
     return () => { socket.off('config_list'); };
   }, []);
 
-  // LÓGICA DE LOGIN INTELIGENTE
   const handleLogin = (username: string, role: string, remember: boolean) => {
     const u = { username, role };
     setUser(u);
-    
     if (remember) {
-        // Si quiere recordar: LocalStorage (Persistente)
         localStorage.setItem('chatgorithm_user', JSON.stringify(u));
-        sessionStorage.removeItem('chatgorithm_user'); // Limpiamos el otro por si acaso
+        sessionStorage.removeItem('chatgorithm_user');
     } else {
-        // Si NO quiere recordar: SessionStorage (Se borra al cerrar navegador)
         sessionStorage.setItem('chatgorithm_user', JSON.stringify(u));
         localStorage.removeItem('chatgorithm_user');
     }
-    
     socket.emit('login', { username }); 
   };
 
   const handleLogout = () => {
-      // Borramos de ambos sitios para asegurar
       localStorage.removeItem('chatgorithm_user');
       sessionStorage.removeItem('chatgorithm_user');
-      setUser(null); 
-      setSelectedContact(null); 
-      window.location.reload();
+      setUser(null); setSelectedContact(null); window.location.reload();
   };
 
-  if (!user) {
-      return (
-        <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50">
-                <Login onLogin={handleLogin} socket={socket} />
-            </div>
-        </div>
-      );
-  }
+  if (!user) return <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900"><div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50"><Login onLogin={handleLogin} socket={socket} /></div></div>;
 
-  if (view === 'settings') {
-      return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} />;
-  }
+  if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} />;
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
           
-          <div className="w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 flex">
+          {/* BARRA LATERAL (Lógica Móvil: Se oculta si hay chat seleccionado) */}
+          <div className={`
+              w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 
+              ${selectedContact ? 'hidden md:flex' : 'flex'}
+          `}>
             <Sidebar 
                 user={user} 
                 socket={socket} 
@@ -114,7 +102,11 @@ function App() {
             </div>
           </div>
 
-          <main className="flex-1 flex-col min-w-0 bg-white relative flex">
+          {/* ÁREA PRINCIPAL (Lógica Móvil: Se oculta si NO hay chat seleccionado) */}
+          <main className={`
+              flex-1 flex-col min-w-0 bg-white relative
+              ${selectedContact ? 'flex' : 'hidden md:flex'}
+          `}>
             <div className="flex-1 overflow-hidden relative">
               {selectedContact ? (
                 <ChatWindow 
@@ -122,7 +114,8 @@ function App() {
                     user={user} 
                     contact={selectedContact} 
                     config={config}
-                    onBack={() => setSelectedContact(null)} 
+                    // PASAMOS LA FUNCIÓN PARA VOLVER ATRÁS
+                    onBack={() => setSelectedContact(null)}
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
