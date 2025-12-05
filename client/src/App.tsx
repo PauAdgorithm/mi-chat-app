@@ -28,9 +28,7 @@ const getSavedUser = () => {
 };
 
 function App() {
-  // CAMBIO CLAVE: Inicialización "Lazy" (perezosa).
-  // Se ejecuta ANTES del primer renderizado visual. 
-  // Si hay usuario guardado, la App arranca directamente en el Chat, evitando el salto visual.
+  // Inicialización Lazy para evitar saltos visuales
   const [user, setUser] = useState<{username: string, role: string} | null>(getSavedUser);
   
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -43,7 +41,12 @@ function App() {
   });
 
   useEffect(() => {
-    // Si arrancamos con usuario (leído de storage en el useState), nos identificamos al socket
+    // 1. Solicitar permiso para notificaciones al cargar la app
+    if ('Notification' in window && Notification.permission !== 'granted') {
+        Notification.requestPermission();
+    }
+
+    // Si arrancamos con usuario, nos identificamos
     if (user) {
         socket.emit('login', { username: user.username });
     }
@@ -52,14 +55,10 @@ function App() {
     const onConnect = () => {
         setIsConnected(true);
         console.log("🟢 Conectado/Reconectado");
-        
-        // Al volver a conectar, pedimos config
         socket.emit('request_config');
         
-        // Recuperar credenciales frescas del storage para re-autenticar si hubo desconexión larga
         const currentUser = getSavedUser();
         if (currentUser) {
-            // Actualizamos estado por seguridad
             setUser(currentUser);
             socket.emit('login', { username: currentUser.username });
         }
@@ -90,20 +89,27 @@ function App() {
         socket.off('disconnect', onDisconnect);
         socket.off('config_list');
     };
-  }, []); // Array vacío está bien porque usamos getSavedUser() dentro para datos frescos
+  }, []); 
 
   const handleLogin = (username: string, role: string, password: string, remember: boolean) => {
-    const u = { username, role, password }; 
+    // SEGURIDAD: NO guardamos la contraseña en el estado ni en localStorage
+    // Solo guardamos lo necesario para la sesión y la UI
+    const u = { username, role }; 
     setUser(u);
     
+    // Guardamos solo usuario y rol, nunca la password
+    const dataToSave = JSON.stringify(u);
+
     if (remember) {
-        localStorage.setItem('chatgorithm_user', JSON.stringify(u));
+        localStorage.setItem('chatgorithm_user', dataToSave);
         sessionStorage.removeItem('chatgorithm_user');
     } else {
-        sessionStorage.setItem('chatgorithm_user', JSON.stringify(u));
+        sessionStorage.setItem('chatgorithm_user', dataToSave);
         localStorage.removeItem('chatgorithm_user');
     }
     
+    // Enviamos el login al socket (aquí el backend debería validar la password si fuera un login real, 
+    // pero para el socket 'login' evento, parece que solo usas username para mapear el socketID)
     socket.emit('login', { username }); 
   };
 
@@ -113,7 +119,8 @@ function App() {
       setUser(null); 
       setSelectedContact(null); 
       socket.disconnect();
-      socket.connect(); // Reinicia el socket limpio
+      socket.connect(); 
+      // Eliminado el window.location.reload() para una experiencia más suave ("Single Page App")
   };
 
   // --- PANTALLA LOGIN ---
@@ -160,7 +167,6 @@ function App() {
           {/* Área Principal */}
           <main className={`flex-1 flex-col min-w-0 bg-white relative ${selectedContact ? 'flex' : 'hidden md:flex'}`}>
             <div className="flex-1 overflow-hidden relative">
-              {/* Aviso de desconexión sutil */}
               {!isConnected && (
                   <div className="absolute top-0 left-0 right-0 bg-red-500 text-white text-xs text-center py-1 z-50 flex items-center justify-center gap-2">
                       <div className="w-4 h-4 flex items-center justify-center"><WifiOff className="w-3 h-3" /></div>
