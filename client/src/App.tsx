@@ -28,14 +28,12 @@ const getSavedUser = () => {
 };
 
 function App() {
-  // 1. Inicialización Lazy: Lee el storage ANTES del primer render
+  // Inicialización Lazy para evitar saltos visuales
   const [user, setUser] = useState<{username: string, role: string} | null>(getSavedUser);
   
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [view, setView] = useState<'chat' | 'settings'>('chat');
-  
-  // 2. Corrección Conexión: Asumimos 'true' al inicio para evitar flash rojo
-  const [isConnected, setIsConnected] = useState(true);
+  const [isConnected, setIsConnected] = useState(socket.connected);
   
   const [config, setConfig] = useState<{departments: string[], statuses: string[]}>({ 
       departments: [], 
@@ -43,17 +41,14 @@ function App() {
   });
 
   useEffect(() => {
-    // Solicitar permiso de notificación al montar
+    // 1. Solicitar permiso para notificaciones al cargar la app
     if ('Notification' in window && Notification.permission !== 'granted') {
         Notification.requestPermission();
     }
 
-    // Si arrancamos con usuario, enviamos señal de login al socket
+    // Si arrancamos con usuario, nos identificamos
     if (user) {
-        // Nota: Tu backend usa 'login' o 'login_attempt', asegúrate de que coincida
-        // Como tienes 'login_attempt' para auth con DB, puede que necesites ajustar esto si quieres persistencia de socket
-        // Pero para el chat en tiempo real básico esto suele bastar para registrar el ID
-        // En tu backend actual NO veo socket.on('login'), así que esto es informativo o para futuro
+        socket.emit('login', { username: user.username });
     }
 
     // Eventos de conexión
@@ -61,6 +56,12 @@ function App() {
         setIsConnected(true);
         console.log("🟢 Conectado/Reconectado");
         socket.emit('request_config');
+        
+        const currentUser = getSavedUser();
+        if (currentUser) {
+            setUser(currentUser);
+            socket.emit('login', { username: currentUser.username });
+        }
     };
 
     const onDisconnect = () => {
@@ -70,11 +71,6 @@ function App() {
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-
-    // FIX DEL AVISO ROJO: Sincronizar estado real tras un breve delay
-    const connectionCheckTimeout = setTimeout(() => {
-        setIsConnected(socket.connected);
-    }, 1500);
 
     // Cargar configuración
     socket.on('config_list', (list: any[]) => {
@@ -92,14 +88,16 @@ function App() {
         socket.off('connect', onConnect);
         socket.off('disconnect', onDisconnect);
         socket.off('config_list');
-        clearTimeout(connectionCheckTimeout);
     };
   }, []); 
 
   const handleLogin = (username: string, role: string, password: string, remember: boolean) => {
-    const u = { username, role }; // NO guardamos password
+    // SEGURIDAD: NO guardamos la contraseña en el estado ni en localStorage
+    // Solo guardamos lo necesario para la sesión y la UI
+    const u = { username, role }; 
     setUser(u);
     
+    // Guardamos solo usuario y rol, nunca la password
     const dataToSave = JSON.stringify(u);
 
     if (remember) {
@@ -110,8 +108,9 @@ function App() {
         localStorage.removeItem('chatgorithm_user');
     }
     
-    // Si tu backend necesita login para el socket, emítelo aquí
-    // socket.emit('login', { username }); 
+    // Enviamos el login al socket (aquí el backend debería validar la password si fuera un login real, 
+    // pero para el socket 'login' evento, parece que solo usas username para mapear el socketID)
+    socket.emit('login', { username }); 
   };
 
   const handleLogout = () => {
@@ -121,6 +120,7 @@ function App() {
       setSelectedContact(null); 
       socket.disconnect();
       socket.connect(); 
+      // Eliminado el window.location.reload() para una experiencia más suave ("Single Page App")
   };
 
   // --- PANTALLA LOGIN ---

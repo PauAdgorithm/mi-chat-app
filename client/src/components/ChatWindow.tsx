@@ -79,23 +79,17 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
         }
     };
     
-    // NUEVO: Escuchar evento del servidor con LOGS
+    // NUEVO: Escuchar evento del servidor
     const handleRemoteTyping = (data: { user: string, phone: string }) => {
-        // Log para depuración: Abre la consola (F12) para ver esto
-        console.log("🔔 Evento Typing recibido:", data);
-        console.log("ℹ️ Mi usuario:", user.username, "| Chat actual:", contact.phone);
-
-        // La clave es que el 'phone' del evento coincida con el contacto abierto
+        // Solo mostramos si es en ESTE chat (por teléfono) y NO soy yo mismo
         if (data.phone === contact.phone && data.user !== user.username) {
-            console.log("✅ Coincide! Mostrando indicador...");
             setTypingUser(data.user);
             
+            // Borrar el mensaje después de 3 segundos sin actividad
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = setTimeout(() => {
                 setTypingUser(null);
             }, 3000);
-        } else {
-            console.log("❌ No coincide o soy yo mismo.");
         }
     };
 
@@ -117,9 +111,8 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
       setInput(e.target.value);
       
       const now = Date.now();
-      // Emitir evento con debounce de 2 segundos
+      // Solo enviamos señal cada 2 segundos para no saturar
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
-          console.log("📤 Enviando Typing para:", contact.phone);
           socket.emit('typing', { user: user.username, phone: contact.phone });
           lastTypingTimeRef.current = now;
       }
@@ -156,9 +149,9 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
             </div>
             
-            {/* NUEVO: Indicador visual mejorado */}
-            <div className={`overflow-hidden transition-all duration-300 ${typingUser ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-                <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit">
+            {/* NUEVO: Aquí se muestra el indicador visual */}
+            <div className={`h-4 overflow-hidden transition-all duration-300 ${typingUser ? 'opacity-100 mt-1' : 'opacity-0 h-0'}`}>
+                <span className="text-[11px] text-green-600 font-medium flex items-center gap-1">
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
@@ -172,8 +165,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
         <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
       </div>
 
-      {/* ÁREA DE CHAT - FONDO ARREGLADO (Color sólido suave) */}
-      <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => setShowEmojiPicker(false)}>
+      <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
         {messages.map((m, i) => {
           const isMe = m.sender !== contact.phone; 
@@ -181,7 +173,7 @@ export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindow
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
                 {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
-                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
+                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                     {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
                     : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                     : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
