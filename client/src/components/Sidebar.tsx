@@ -18,15 +18,12 @@ interface SidebarProps {
   socket: any;
   onSelectContact: (contact: Contact) => void;
   selectedContactId?: string;
-  isConnected?: boolean;
-  // NUEVOS PROPS
-  onlineUsers: string[]; 
-  typingStatus: { [chatId: string]: string };
+  isConnected?: boolean; // Nuevo prop para saber estado
 }
 
 type FilterType = 'all' | 'mine' | 'dept' | 'unassigned';
 
-export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {} }: SidebarProps) {
+export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true }: SidebarProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,10 +32,12 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   // Efecto Maestro: Carga inicial y recarga al conectar
   useEffect(() => {
+    // Si el socket se conecta (o reconecta), pedimos datos inmediatamente
     if (socket && isConnected) {
+        console.log("🔄 Sidebar: Socket activo, pidiendo contactos...");
         socket.emit('request_contacts');
     }
-  }, [socket, isConnected]);
+  }, [socket, isConnected]); // Se ejecuta cada vez que 'isConnected' cambia a true
 
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
@@ -66,6 +65,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     socket.on('message', handleNewMessageNotification);
 
+    // Polling de seguridad (cada 10s es suficiente, 5s satura)
     const interval = setInterval(() => {
         if(isConnected) socket.emit('request_contacts');
     }, 10000);
@@ -119,6 +119,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
+                {/* Loader suave */}
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
                     <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />
                 </div>
@@ -126,46 +127,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             </div>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {filteredContacts.map((contact) => {
-              // Lógica de estado para cada contacto
-              const isTyping = typingStatus[contact.phone];
-              const isOnline = onlineUsers.includes(contact.phone); // Solo funcionará si el cliente también está en el socket
-
-              return (
-                <li key={contact.id || Math.random()}>
-                  <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
-                    
-                    {/* AVATAR con indicador Online */}
-                    <div className="relative">
-                        <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
-                            {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
-                        </div>
-                        {isOnline && (
-                            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-                        )}
+            {filteredContacts.map((contact) => (
+              <li key={contact.id || Math.random()}>
+                <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
+                  <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
+                    {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-1"><span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span><span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span></div>
+                    <p className="text-xs text-slate-500 truncate h-4">{cleanMessagePreview(contact.last_message)}</p>
+                    <div className="flex gap-1 mt-2 flex-wrap">
+                        {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
+                        {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
+                        {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                     </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-baseline mb-1">
-                          <span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span>
-                          <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span>
-                      </div>
-                      
-                      {/* PREVIEW DEL MENSAJE O ESCRIBIENDO */}
-                      <p className={`text-xs truncate h-4 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
-                        {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
-                      </p>
-
-                      <div className="flex gap-1 mt-2 flex-wrap">
-                          {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
-                          {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
-                          {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
-                      </div>
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
+                  </div>
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </div>
