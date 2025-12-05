@@ -233,10 +233,16 @@ io.on('connection', (socket) => {
   socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() }); await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
-  // --- LÓGICA DE ESCRIBIENDO AÑADIDA AL FINAL ---
+  // --- LÓGICA DE ESCRIBIENDO AÑADIDA ---
   socket.on('typing', (data) => {
-    // Retransmitir a todos excepto al remitente (Broadcast)
+    // 🔔 AQUÍ ESTÁN LOS LOGS QUE NECESITABAS VER
+    console.log(`🔔 [SERVER] Recibido evento typing de usuario: ${data.user} para el chat: ${data.phone}`); 
+    
+    // Retransmitir evento a todos los demás clientes conectados
     socket.broadcast.emit('remote_typing', data);
+    
+    // Log para confirmar que salió del servidor
+    console.log("📡 [SERVER] Retransmitido remote_typing a todos");
   });
 });
 
