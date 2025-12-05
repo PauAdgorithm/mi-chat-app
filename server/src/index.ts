@@ -38,6 +38,10 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// --- ALMACÉN DE USUARIOS ONLINE ---
+// Mapa para guardar socket.id -> username
+const onlineUsers = new Map<string, string>();
+
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 app.get('/api/media/:id', async (req, res) => {
@@ -233,15 +237,36 @@ io.on('connection', (socket) => {
   socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() }); await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
-  // --- LÓGICA DE ESCRIBIENDO AÑADIDA ---
+  // --- LÓGICA DE USUARIOS ONLINE ---
+  socket.on('register_presence', (username: string) => {
+    // Cuando el cliente dice "Hola, soy X", lo guardamos
+    if (username) {
+      onlineUsers.set(socket.id, username);
+      console.log(`🟢 Usuario online: ${username} (ID: ${socket.id})`);
+      
+      // Enviamos a TODOS la lista actualizada de nombres únicos
+      const uniqueUsers = Array.from(new Set(onlineUsers.values()));
+      io.emit('online_users_update', uniqueUsers);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // Si el socket se desconecta, miramos quién era y lo borramos
+    if (onlineUsers.has(socket.id)) {
+      const leaver = onlineUsers.get(socket.id);
+      onlineUsers.delete(socket.id);
+      console.log(`🔴 Usuario offline: ${leaver} (ID: ${socket.id})`);
+
+      // Enviamos la lista actualizada
+      const uniqueUsers = Array.from(new Set(onlineUsers.values()));
+      io.emit('online_users_update', uniqueUsers);
+    }
+  });
+
+  // --- LÓGICA DE ESCRIBIENDO ---
   socket.on('typing', (data) => {
-    // 🔔 AQUÍ ESTÁN LOS LOGS QUE NECESITABAS VER
     console.log(`🔔 [SERVER] Recibido evento typing de usuario: ${data.user} para el chat: ${data.phone}`); 
-    
-    // Retransmitir evento a todos los demás clientes conectados
     socket.broadcast.emit('remote_typing', data);
-    
-    // Log para confirmar que salió del servidor
     console.log("📡 [SERVER] Retransmitido remote_typing a todos");
   });
 });
