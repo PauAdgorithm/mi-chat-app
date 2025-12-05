@@ -136,11 +136,8 @@ io.on('connection', (socket) => {
               const records = await base('Config').select().all();
               socket.emit('config_list', records.map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') })));
           } catch(e) { console.error(e); }
-          
       }
-      
   });
-  
 
   socket.on('add_config', async (data) => { 
       if (base) {
@@ -236,23 +233,10 @@ io.on('connection', (socket) => {
   socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() }); await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
-  // --- NUEVA LÓGICA DE ESCRIBIENDO (Sin romper nada) ---
+  // --- LÓGICA DE ESCRIBIENDO AÑADIDA AL FINAL ---
   socket.on('typing', (data) => {
-    // Retransmitir evento a todos los demás clientes conectados
+    // Retransmitir a todos excepto al remitente (Broadcast)
     socket.broadcast.emit('remote_typing', data);
-    
-  });
-  // ... resto de tu código de conexión ...
-
-  // AÑADIR ESTO PARA QUE FUNCIONE EL "ESCRIBIENDO..."
-  socket.on('typing', (data: any) => {
-    // Retransmitir a todos excepto al que escribe
-    socket.broadcast.emit('remote_typing', data);
-  });
-
-  // Manejo de desconexión (opcional, para depuración)
-  socket.on('disconnect', () => {
-    console.log('Usuario desconectado');
   });
 });
 
