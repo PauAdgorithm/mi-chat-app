@@ -14,6 +14,7 @@
     "dist": "electron-builder"
   },
   "dependencies": {
+    "emoji-picker-react": "^4.16.1",
     "lucide-react": "^0.454.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -45,7 +46,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/logo.ico" 
+      "icon": "public/logo.ico"
     },
     "files": [
       "electron.cjs",
@@ -53,4 +54,3 @@
     ]
   }
 }
-
