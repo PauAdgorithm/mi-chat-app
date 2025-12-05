@@ -1,138 +1,286 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft } from 'lucide-react';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
-import { Contact } from './Sidebar';
+import { Send, ArrowLeft, MoreVertical, Paperclip, Smile, ArrowDown } from 'lucide-react';
+import EmojiPicker from 'emoji-picker-react';
 
-interface ChatWindowProps {
-  socket: any;
-  user: { username: string };
-  contact: Contact;
-  config?: { departments: string[]; statuses: string[]; };
-  onBack: () => void;
+// Intentamos importar electron de forma segura
+let ipcRenderer: any = null;
+if (window.require) {
+  try {
+    const electron = window.require('electron');
+    ipcRenderer = electron.ipcRenderer;
+  } catch (e) {
+    console.log("No estamos en entorno Electron");
+  }
 }
 
 interface Message {
-  text: string;
-  sender: string;
-  timestamp: string;
-  type?: string;
-  mediaId?: string;
+    id: number;
+    text: string;
+    sender: string;
+    timestamp: string;
+    type: 'sent' | 'received';
 }
 
-const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
-  const [isPlaying, setIsPlaying] = useState(false); const [progress, setProgress] = useState(0); const [duration, setDuration] = useState(0); const [currentTime, setCurrentTime] = useState(0); const [playbackRate, setPlaybackRate] = useState(1); const [volume, setVolume] = useState(1); const [isMuted, setIsMuted] = useState(false); const [showVolumeSlider, setShowVolumeSlider] = useState(false); const [audioUrl, setAudioUrl] = useState<string | null>(null); const [isReady, setIsReady] = useState(false); const audioRef = useRef<HTMLAudioElement>(null);
-  useEffect(() => { fetch(src).then(r => r.blob()).then(blob => { setAudioUrl(URL.createObjectURL(blob)); setIsReady(true); }).catch(e => console.error(e)); }, [src]);
-  useEffect(() => { if (audioRef.current) { audioRef.current.playbackRate = playbackRate; audioRef.current.volume = isMuted ? 0 : volume; } }, [playbackRate, volume, isMuted]);
-  const togglePlay = () => { const audio = audioRef.current; if (!audio) return; if (isPlaying) audio.pause(); else audio.play(); setIsPlaying(!isPlaying); };
-  const toggleSpeed = () => { const speeds = [1, 1.25, 1.5, 2]; setPlaybackRate(speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length]); };
-  const toggleMute = () => setIsMuted(!isMuted);
-  const onTimeUpdate = () => { const audio = audioRef.current; if (!audio) return; setCurrentTime(audio.currentTime); setProgress((audio.currentTime / (audio.duration || 1)) * 100); };
-  const onLoadedMetadata = (e: any) => setDuration(e.currentTarget.duration);
-  const onEnded = () => { setIsPlaying(false); setProgress(0); setCurrentTime(0); };
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => { const audio = audioRef.current; if (!audio) return; const newTime = (Number(e.target.value) / 100) * duration; audio.currentTime = newTime; setProgress(Number(e.target.value)); };
-  const formatTime = (time: number) => { if (isNaN(time)) return "0:00"; const min = Math.floor(time / 60); const sec = Math.floor(time % 60); return `${min}:${sec < 10 ? '0' : ''}${sec}`; };
-  if (!isReady) return <div className="text-xs text-slate-400 p-2 italic">Cargando...</div>;
-  return ( <div className={`flex items-start gap-2 p-2 rounded-xl w-full max-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}> <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" /> <button onClick={togglePlay} className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 mt-0.5 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}> {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />} </button> <div className="flex-1 flex flex-col gap-1 w-full min-w-0"> <div className="h-5 flex items-center"><input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`} /></div> <div className="flex justify-between items-center text-[10px] font-medium text-slate-500 h-5 w-full"> <span className="font-mono tabular-nums min-w-[35px]">{currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}</span> <div className="flex items-center gap-2"> <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 rounded text-[9px] font-bold min-w-[22px] text-center">{playbackRate}x</button> <div className="relative flex items-center group hidden sm:flex" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}> <button onClick={toggleMute} className="p-1 hover:text-slate-800"><Volume2 className="w-3.5 h-3.5" /></button> {showVolumeSlider && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 z-20"><div className="h-16 w-4 flex items-center justify-center"><input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div></div>} </div> <a href={src} download="audio.webm" target="_blank" rel="noreferrer" className="p-1 hover:bg-black/5 rounded-full"><Download className="w-3.5 h-3.5" /></a> </div> </div> </div> </div> );
-};
+interface ChatWindowProps {
+    socket: any;
+    user: { username: string; role: string };
+    contact: { id: number; name: string; avatar: string; status: string; role: string; unread: number };
+    config: { departments: string[], statuses: string[] };
+    onBack: () => void;
+}
 
 export function ChatWindow({ socket, user, contact, config, onBack }: ChatWindowProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [name, setName] = useState(contact.name || '');
-  const [department, setDepartment] = useState(contact.department || '');
-  const [status, setStatus] = useState(contact.status || '');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [newMessage, setNewMessage] = useState("");
+    const [showEmoji, setShowEmoji] = useState(false);
+    const [isTyping, setIsTyping] = useState(false);
+    const [typingUser, setTypingUser] = useState<string | null>(null);
+    const [showScrollButton, setShowScrollButton] = useState(false);
+    
+    // Referencias para el scroll
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const chatContainerRef = useRef<HTMLDivElement>(null);
+    const typingTimeoutRef = useRef<any>(null);
+    const soundRef = useRef<HTMLAudioElement | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+    // Inicializar sonido
+    useEffect(() => {
+        soundRef.current = new Audio('/pop.mp3');
+    }, []);
 
-  const isProduction = window.location.hostname.includes('render.com');
-  const API_URL = isProduction ? 'https://chatgorithm.onrender.com' : 'http://localhost:3000';
-
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  useEffect(() => scrollToBottom(), [messages]);
-
-  useEffect(() => {
-    setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
-    setMessages([]); setShowEmojiPicker(false); setIsRecording(false);
-    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
-  }, [contact, socket]);
-
-  useEffect(() => {
-    const handleHistory = (history: Message[]) => setMessages(history);
-    const handleNewMessage = (msg: any) => {
-        if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) setMessages((prev) => [...prev, msg]);
+    // Scroll al fondo suave
+    const scrollToBottom = (behavior: 'smooth' | 'auto' = 'smooth') => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
     };
-    if (socket) {
-        socket.on('conversation_history', handleHistory);
-        socket.on('message', handleNewMessage);
-        return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); };
-    }
-  }, [socket, contact.phone]);
 
-  const sendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (input.trim()) {
-      const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: 'text' };
-      socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false);
-    }
-  };
+    // Detectar si el usuario está lejos del fondo para mostrar botón
+    const handleScroll = () => {
+        if (!chatContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+        // Si estamos a más de 200px del fondo, mostrar botón
+        const isFarFromBottom = scrollHeight - scrollTop - clientHeight > 200;
+        setShowScrollButton(isFarFromBottom);
+    };
 
-  const updateCRM = (field: string, value: string) => { if (socket) { const updates: any = {}; updates[field] = value; socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); }};
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
-  const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; } };
-  const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
-  const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
-  const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
-  const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
+    // Efecto para manejar mensajes entrantes y notificaciones
+    useEffect(() => {
+        const handleReceiveMessage = (msg: any) => {
+            // Solo procesar si es de este chat o es broadcast relevante
+            const isRelevant = (msg.sender === contact.name) || (msg.receiver === user.username && msg.sender === contact.name);
+            
+            if (isRelevant) {
+                const incomingMsg: Message = {
+                    id: Date.now(),
+                    text: msg.text,
+                    sender: msg.sender,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    type: 'received'
+                };
+                
+                setMessages(prev => [...prev, incomingMsg]);
+                setTypingUser(null); // Dejar de mostrar "escribiendo" al recibir mensaje
 
-  return (
-    <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
-      {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
+                // --- LÓGICA DE NOTIFICACIONES ---
+                if (document.hidden || !document.hasFocus()) {
+                    // 1. Sonido
+                    soundRef.current?.play().catch(e => console.log("Audio play blocked", e));
+                    
+                    // 2. Notificación Nativa de Windows
+                    if (Notification.permission === 'granted') {
+                        new Notification(`Nuevo mensaje de ${contact.name}`, {
+                            body: msg.text,
+                            icon: '/logo.ico'
+                        });
+                    }
 
-      <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
-        {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
-        <div className="flex items-center gap-2 flex-1 min-w-[140px] bg-slate-50 px-2 rounded-md border border-slate-200"><User className="w-4 h-4 text-slate-400" /><input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} /></div>
-        <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
-        <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
-      </div>
+                    // 3. Flash Frame (Electron Taskbar)
+                    if (ipcRenderer) {
+                        ipcRenderer.send('flash-frame');
+                    }
+                }
 
-      <div className="flex-1 p-6 overflow-y-auto space-y-4" onClick={() => setShowEmojiPicker(false)}>
-        {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
-        {messages.map((m, i) => {
-          const isMe = m.sender !== contact.phone; 
-          return (
-            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
-                {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
-                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
-                    {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
-                    : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
-                    : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
-                    : <p className="whitespace-pre-wrap break-words">{String(m.text || "")}</p>}
-                    <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
+                // Scroll automático solo si ya estábamos cerca del fondo
+                if (!showScrollButton) {
+                    setTimeout(() => scrollToBottom(), 100);
+                }
+            }
+        };
+
+        const handleUserTyping = (data: { user: string }) => {
+            if (data.user === contact.name) {
+                setTypingUser(contact.name);
+                // Limpiar el estado "escribiendo" después de 3 segundos sin eventos
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
+            }
+        };
+
+        socket.on('receive_message', handleReceiveMessage);
+        socket.on('user_typing', handleUserTyping);
+
+        // Cargar mensajes iniciales (simulado)
+        // En producción aquí harías un fetch al backend para historial
+        setMessages([
+            { id: 1, text: "Hola, ¿cómo estás?", sender: contact.name, timestamp: "09:00", type: 'received' },
+            { id: 2, text: "Todo bien por aquí, avanzando con el proyecto.", sender: user.username, timestamp: "09:05", type: 'sent' }
+        ]);
+
+        return () => {
+            socket.off('receive_message', handleReceiveMessage);
+            socket.off('user_typing', handleUserTyping);
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        };
+    }, [contact.name, user.username, showScrollButton]);
+
+    // Manejar input de usuario (Emitir escribiendo)
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setNewMessage(e.target.value);
+        
+        if (!isTyping) {
+            setIsTyping(true);
+            socket.emit('typing', { target: contact.name });
+        }
+
+        // Debounce para dejar de emitir typing
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+            setIsTyping(false);
+        }, 2000);
+    };
+
+    const handleSendMessage = (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (newMessage.trim()) {
+            const msgData = {
+                text: newMessage,
+                sender: user.username,
+                receiver: contact.name,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
+            socket.emit('send_message', msgData);
+
+            setMessages(prev => [...prev, {
+                id: Date.now(),
+                text: newMessage,
+                sender: user.username,
+                timestamp: msgData.timestamp,
+                type: 'sent'
+            }]);
+            
+            setNewMessage("");
+            setShowEmoji(false);
+            setIsTyping(false);
+            setTimeout(() => scrollToBottom(), 100);
+        }
+    };
+
+    const onEmojiClick = (emojiObject: any) => {
+        setNewMessage(prev => prev + emojiObject.emoji);
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-[#efeae2] relative">
+            {/* Header */}
+            <div className="bg-[#f0f2f5] p-3 flex items-center justify-between shadow-sm border-b border-gray-200 z-10">
+                <div className="flex items-center gap-3">
+                    <button onClick={onBack} className="md:hidden p-2 hover:bg-gray-200 rounded-full">
+                        <ArrowLeft className="w-5 h-5 text-gray-600" />
+                    </button>
+                    <div className="relative">
+                        <img src={contact.avatar} alt={contact.name} className="w-10 h-10 rounded-full object-cover" />
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${contact.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                    </div>
+                    <div>
+                        <h2 className="font-semibold text-gray-800">{contact.name}</h2>
+                        <div className="text-xs text-gray-500 h-4">
+                            {typingUser ? (
+                                <span className="text-green-600 font-medium animate-pulse">Escribiendo...</span>
+                            ) : (
+                                <span className="capitalize">{contact.role} • {contact.status}</span>
+                            )}
+                        </div>
+                    </div>
                 </div>
-              </div>
+                <button className="p-2 hover:bg-gray-200 rounded-full text-gray-600">
+                    <MoreVertical className="w-5 h-5" />
+                </button>
             </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
-      </div>
-      {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
-      <div className="p-3 bg-white border-t border-slate-200 relative z-20">
-        <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : "Mensaje"} disabled={isUploading || isRecording} className="flex-1 py-3 px-4 bg-slate-50 rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 text-sm" />
-          <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
-          {input.trim() ? <button type="submit" disabled={isUploading} className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition shadow-sm"><Send className="w-5 h-5" /></button> : <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'}`} title="Grabar"><Mic className="w-5 h-5" /></button>}
-        </form>
-      </div>
-    </div>
-  );
+
+            {/* Chat Area */}
+            <div 
+                ref={chatContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto p-4 space-y-4 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat bg-contain"
+            >
+                {messages.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.type === 'sent' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[70%] p-3 rounded-lg shadow-sm relative ${
+                            msg.type === 'sent' 
+                                ? 'bg-[#d9fdd3] rounded-tr-none' 
+                                : 'bg-white rounded-tl-none'
+                        }`}>
+                            <p className="text-gray-800 text-sm leading-relaxed">{msg.text}</p>
+                            <span className="text-[10px] text-gray-500 block text-right mt-1">
+                                {msg.timestamp}
+                            </span>
+                        </div>
+                    </div>
+                ))}
+                <div ref={messagesEndRef} />
+            </div>
+
+            {/* Botón flotante para bajar */}
+            {showScrollButton && (
+                <button 
+                    onClick={() => scrollToBottom()}
+                    className="absolute bottom-20 right-6 bg-white p-2 rounded-full shadow-lg text-gray-600 hover:text-blue-500 transition-all animate-bounce z-20"
+                >
+                    <ArrowDown className="w-5 h-5" />
+                    {/* Badge si hay mensajes nuevos sin leer podría ir aquí */}
+                </button>
+            )}
+
+            {/* Input Area */}
+            <div className="bg-[#f0f2f5] p-3 flex items-center gap-2 relative z-20">
+                {showEmoji && (
+                    <div className="absolute bottom-16 left-0 shadow-2xl rounded-lg overflow-hidden">
+                        <EmojiPicker onEmojiClick={onEmojiClick} />
+                    </div>
+                )}
+                
+                <button 
+                    onClick={() => setShowEmoji(!showEmoji)} 
+                    className={`p-2 rounded-full transition ${showEmoji ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:bg-gray-200'}`}
+                >
+                    <Smile className="w-6 h-6" />
+                </button>
+                
+                <button className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition">
+                    <Paperclip className="w-5 h-5" />
+                </button>
+
+                <form onSubmit={handleSendMessage} className="flex-1 flex gap-2">
+                    <input
+                        type="text"
+                        value={newMessage}
+                        onChange={handleInputChange}
+                        placeholder="Escribe un mensaje"
+                        className="flex-1 px-4 py-2 rounded-lg border-none focus:ring-0 focus:outline-none bg-white shadow-sm"
+                    />
+                    <button 
+                        type="submit" 
+                        disabled={!newMessage.trim()}
+                        className={`p-2 rounded-full transition ${
+                            newMessage.trim() 
+                                ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' 
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                    >
+                        <Send className="w-5 h-5" />
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
 }
