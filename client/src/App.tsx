@@ -22,7 +22,15 @@ function App() {
   });
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('chatgorithm_user');
+    // 1. Recuperar sesión (Miramos en los dos sitios)
+    // Primero LocalStorage (Persistente)
+    let savedUser = localStorage.getItem('chatgorithm_user');
+    
+    // Si no está, miramos en SessionStorage (Temporal)
+    if (!savedUser) {
+        savedUser = sessionStorage.getItem('chatgorithm_user');
+    }
+
     if (savedUser) {
         try {
             const parsed = JSON.parse(savedUser);
@@ -34,7 +42,6 @@ function App() {
     socket.on('config_list', (list: any[]) => {
         const depts = list.filter(i => i.type === 'Department').map(i => i.name);
         const stats = list.filter(i => i.type === 'Status').map(i => i.name);
-        
         setConfig({ 
             departments: depts.length > 0 ? depts : ['Ventas', 'Taller', 'Admin'], 
             statuses: stats.length > 0 ? stats : ['Nuevo', 'Abierto', 'Cerrado'] 
@@ -45,16 +52,31 @@ function App() {
     return () => { socket.off('config_list'); };
   }, []);
 
-  const handleLogin = (username: string, role: string) => {
+  // LÓGICA DE LOGIN INTELIGENTE
+  const handleLogin = (username: string, role: string, remember: boolean) => {
     const u = { username, role };
     setUser(u);
-    localStorage.setItem('chatgorithm_user', JSON.stringify(u));
+    
+    if (remember) {
+        // Si quiere recordar: LocalStorage (Persistente)
+        localStorage.setItem('chatgorithm_user', JSON.stringify(u));
+        sessionStorage.removeItem('chatgorithm_user'); // Limpiamos el otro por si acaso
+    } else {
+        // Si NO quiere recordar: SessionStorage (Se borra al cerrar navegador)
+        sessionStorage.setItem('chatgorithm_user', JSON.stringify(u));
+        localStorage.removeItem('chatgorithm_user');
+    }
+    
     socket.emit('login', { username }); 
   };
 
   const handleLogout = () => {
+      // Borramos de ambos sitios para asegurar
       localStorage.removeItem('chatgorithm_user');
-      setUser(null); setSelectedContact(null); window.location.reload();
+      sessionStorage.removeItem('chatgorithm_user');
+      setUser(null); 
+      setSelectedContact(null); 
+      window.location.reload();
   };
 
   if (!user) {
@@ -75,37 +97,24 @@ function App() {
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
           
-          {/* LÓGICA RESPONSIVE:
-             - Si hay contacto seleccionado: Ocultamos Sidebar en móvil (hidden), mostramos en PC (md:flex)
-             - Si NO hay contacto: Mostramos Sidebar en móvil (flex) y en PC (md:flex)
-          */}
-          <div className={`w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 
-              ${selectedContact ? 'hidden md:flex' : 'flex'}
-          `}>
+          <div className="w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 flex">
             <Sidebar 
                 user={user} 
                 socket={socket} 
                 onSelectContact={setSelectedContact} 
                 selectedContactId={selectedContact?.id} 
             />
-            
             <div className="p-3 border-t border-slate-200 bg-white flex gap-2">
-                <button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition"><SettingsIcon className="w-5 h-5" /></button>
+                <button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition" title="Configuración"><SettingsIcon className="w-5 h-5" /></button>
                 <div className="flex-1 flex items-center gap-2 bg-slate-50 px-3 rounded-lg border border-slate-100">
                     <div className="w-2 h-2 rounded-full bg-green-500"></div>
                     <span className="text-xs font-bold text-slate-600 truncate">{user.username}</span>
                 </div>
-                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><LogOut className="w-5 h-5" /></button>
+                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Salir"><LogOut className="w-5 h-5" /></button>
             </div>
           </div>
 
-          {/* LÓGICA RESPONSIVE:
-             - Si hay contacto: Mostramos Chat en móvil (flex) y PC (md:flex)
-             - Si NO hay contacto: Ocultamos Chat en móvil (hidden), mostramos placeholder en PC (md:flex)
-          */}
-          <main className={`flex-1 flex-col min-w-0 bg-white relative 
-              ${selectedContact ? 'flex' : 'hidden md:flex'}
-          `}>
+          <main className="flex-1 flex-col min-w-0 bg-white relative flex">
             <div className="flex-1 overflow-hidden relative">
               {selectedContact ? (
                 <ChatWindow 
@@ -113,7 +122,7 @@ function App() {
                     user={user} 
                     contact={selectedContact} 
                     config={config}
-                    onBack={() => setSelectedContact(null)} // PASAMOS LA FUNCIÓN DE VOLVER
+                    onBack={() => setSelectedContact(null)} 
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
