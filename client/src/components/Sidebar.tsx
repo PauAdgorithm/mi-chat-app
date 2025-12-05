@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Users, Search, RefreshCw, UserCheck, Briefcase } from 'lucide-react';
 
+// 👇 IMPORTANTE: Tiene que tener "export" para que App.tsx lo vea
 export interface Contact {
   id: string;
   phone: string;
@@ -8,7 +9,7 @@ export interface Contact {
   status?: string;
   department?: string;
   assigned_to?: string;
-  last_message?: string | any;
+  last_message?: any;
   last_message_time?: string;
   avatar?: string;
 }
@@ -26,19 +27,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Referencia para el sonido
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Cargar el audio al iniciar
-    audioRef.current = new Audio('/notification.mp3');
-
-    // Pedir permiso para notificaciones visuales al navegador
-    if (Notification.permission !== 'granted') {
-        Notification.requestPermission();
-    }
-
     if (!socket) return;
 
     socket.on('contacts_update', (newContacts: any) => {
@@ -53,38 +43,14 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
         socket.emit('request_contacts');
     });
 
-    // --- ESCUCHAR MENSAJES NUEVOS PARA NOTIFICAR ---
-    const handleNewMessageNotification = (msg: any) => {
-        // Solo notificamos si el mensaje NO lo envié yo (Agente o mi usuario)
-        const isMe = msg.sender === 'Agente' || msg.sender === user.username;
-        
-        if (!isMe) {
-            // 1. Sonido
-            audioRef.current?.play().catch(e => console.log("Audio bloqueado por navegador hasta interacción"));
-
-            // 2. Notificación Visual (Si tenemos permiso y la ventana no está en foco)
-            if (Notification.permission === 'granted' && document.hidden) {
-                new Notification(`Nuevo mensaje de ${msg.sender}`, {
-                    body: msg.text,
-                    icon: '/vite.svg' // Icono de tu app
-                });
-            }
-        }
-        // Siempre refrescamos la lista para que suba arriba
-        socket.emit('request_contacts');
-    };
-
-    socket.on('message', handleNewMessageNotification);
-
     const interval = setInterval(() => socket.emit('request_contacts'), 5000);
 
     return () => {
       socket.off('contacts_update');
       socket.off('contact_updated_notification');
-      socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
-  }, [socket, user.username]);
+  }, [socket]);
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -110,10 +76,12 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
                             (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
+
       if (filter === 'all') return true;
       if (filter === 'mine') return c.assigned_to === user.username || c.department === user.role;
       if (filter === 'dept') return c.department === user.role;
       if (filter === 'unassigned') return !c.assigned_to && !c.department;
+      
       return true;
   });
 
@@ -183,19 +151,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId }: Si
                     </p>
                     
                     <div className="flex gap-1 mt-2 flex-wrap">
-                        {contact.status === 'Nuevo' && (
-                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>
-                        )}
-                        {contact.department && (
-                            <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">
-                                {String(contact.department)}
-                            </span>
-                        )}
-                        {contact.assigned_to && (
-                            <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3" /> {contact.assigned_to}
-                            </span>
-                        )}
+                        {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
+                        {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
+                        {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                     </div>
                   </div>
                 </button>
