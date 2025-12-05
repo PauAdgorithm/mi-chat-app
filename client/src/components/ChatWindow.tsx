@@ -9,7 +9,7 @@ interface ChatWindowProps {
   contact: Contact;
   config?: { departments: string[]; statuses: string[]; };
   onBack: () => void;
-  // NUEVOS PROPS
+  // Props de estado global
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
 }
@@ -49,10 +49,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  // LOGICA TYPING NUEVA: Usamos 'typingInfo' que viene de App.tsx en lugar de listener local
+  // LOGICA DE ESTADO (Usando props)
   const typingUser = typingInfo[contact.phone] || null;
-  const lastTypingTimeRef = useRef<number>(0);
+  const isOnline = onlineUsers.includes(contact.phone);
 
+  const lastTypingTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -79,12 +80,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         }
     };
     
-    // NOTA: Hemos eliminado el listener 'remote_typing' de aquí porque ahora se maneja en App.tsx y nos llega por props
-
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        
         return () => { 
             socket.off('conversation_history', handleHistory); 
             socket.off('message', handleNewMessage); 
@@ -94,9 +92,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
-      
       const now = Date.now();
-      // Emitir evento con debounce de 2 segundos
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
           lastTypingTimeRef.current = now;
@@ -119,41 +115,36 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
 
-  // CALCULAR ESTADO DE CABECERA
-  const isOnline = onlineUsers.includes(contact.phone);
-  
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
+      {/* HEADER RESTAURADO */}
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
         
-        {/* CABECERA CON ESTADO ONLINE/TYPING */}
         <div className="flex flex-col flex-1 min-w-[140px]">
             <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                 <User className="w-4 h-4 text-slate-400" />
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
             </div>
             
-            {/* LÓGICA DE ESTADO: Prioridad Escribiendo > Online > Nada */}
-            <div className="mt-1 h-5 flex items-center">
+            {/* ESTADO CON DISEÑO ORIGINAL + LÓGICA HÍBRIDA */}
+            <div className={`overflow-hidden transition-all duration-300 ${(typingUser || isOnline) ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                 {typingUser ? (
-                    <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
-                         <span className="relative flex h-2 w-2">
+                    <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit">
+                        <span className="relative flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                         </span>
                         {typingUser} está escribiendo...
                     </span>
-                ) : isOnline ? (
-                    <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                        En línea
-                    </span>
                 ) : (
-                    <span className="text-[10px] text-slate-400">
-                        {/* Espacio reservado o última conexión */}
+                    <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit">
+                         <span className="relative flex h-2 w-2">
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        En línea
                     </span>
                 )}
             </div>
@@ -163,7 +154,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
       </div>
 
-      {/* ÁREA DE CHAT */}
+      {/* ÁREA DE CHAT - FONDO ORIGINAL */}
       <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
         {messages.map((m, i) => {
