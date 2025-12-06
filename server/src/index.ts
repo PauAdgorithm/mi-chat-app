@@ -18,19 +18,26 @@ app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
+// --- VARIABLES DE ENTORNO ---
 const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
 const waToken = process.env.WHATSAPP_TOKEN;
 const waPhoneId = process.env.WHATSAPP_PHONE_ID; 
 const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN; 
 
+// Nombre de la tabla de plantillas en Airtable
+const TABLE_TEMPLATES = 'Templates';
+
+// --- CONFIGURACIÓN AIRTABLE ---
 let base: Airtable.Base | null = null;
 if (airtableApiKey && airtableBaseId) {
   try {
     Airtable.configure({ apiKey: airtableApiKey });
     base = Airtable.base(airtableBaseId);
-    console.log("✅ Airtable configurado");
+    console.log("✅ Airtable configurado correctamente");
   } catch (e) { console.error("Error Airtable:", e); }
+} else {
+    console.error("❌ FALTA CONFIGURACIÓN: Revisa AIRTABLE_API_KEY y AIRTABLE_BASE_ID en tu .env o Render");
 }
 
 const httpServer = createServer(app);
@@ -39,8 +46,103 @@ const io = new Server(httpServer, {
 });
 
 const onlineUsers = new Map<string, string>();
-
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
+
+// ==========================================
+//  NUEVAS RUTAS: GESTIÓN DE PLANTILLAS
+// ==========================================
+
+// 1. OBTENER PLANTILLAS (GET)
+app.get('/api/templates', async (req, res) => {
+    if (!base) return res.status(500).json({ error: "Airtable no conectado" });
+    
+    console.log("📥 Petición recibida: GET /api/templates");
+
+    try {
+        // Obtenemos todos los registros de la tabla Templates
+        const records = await base(TABLE_TEMPLATES).select().all();
+
+        const formattedTemplates = records.map((record) => ({
+            id: record.id,
+            name: (record.get('Name') as string) || '',
+            category: (record.get('Category') as string) || 'MARKETING',
+            language: (record.get('Language') as string) || 'es',
+            body: (record.get('Body') as string) || '',
+            footer: (record.get('Footer') as string) || '',
+            status: (record.get('Status') as string) || 'PENDING',
+            metaId: (record.get('MetaId') as string) || '',
+            // Parseamos el JSON de variables si existe
+            variableMapping: record.get('VariableMapping') 
+                ? JSON.parse(record.get('VariableMapping') as string) 
+                : {}
+        }));
+
+        res.json(formattedTemplates);
+    } catch (error: any) {
+        console.error("❌ Error obteniendo plantillas:", error);
+        // Si la tabla no existe en Airtable, avisamos
+        if (error.error === 'NOT_FOUND') {
+            return res.status(404).json({ error: "La tabla 'Templates' no existe en Airtable" });
+        }
+        res.status(500).json({ error: "Error interno", details: error.message });
+    }
+});
+
+// 2. CREAR PLANTILLA (POST)
+app.post('/api/create-template', async (req, res) => {
+    if (!base) return res.status(500).json({ error: "Airtable no conectado" });
+
+    console.log("📤 Petición recibida: POST /api/create-template", req.body.name);
+
+    try {
+        const { name, category, body, language, footer, variableExamples } = req.body;
+        
+        // Simulamos ID de Meta (Aquí iría la llamada real a la API de WhatsApp Business)
+        const simuladoMetaId = "meta_" + Date.now();
+
+        // Guardamos en Airtable
+        const createdRecords = await base(TABLE_TEMPLATES).create([
+            {
+                "fields": {
+                    "Name": name,
+                    "Category": category,
+                    "Language": language,
+                    "Body": body,
+                    "Footer": footer,
+                    "Status": "PENDING", // Siempre empieza pendiente
+                    "MetaId": simuladoMetaId,
+                    // Guardamos el objeto de variables como Texto JSON
+                    "VariableMapping": JSON.stringify(variableExamples || {})
+                }
+            }
+        ]);
+
+        const record = createdRecords[0];
+
+        // Devolvemos el objeto creado al frontend
+        res.json({
+            success: true,
+            template: {
+                id: record.id,
+                name: record.get('Name'),
+                category: record.get('Category'),
+                language: record.get('Language'),
+                body: record.get('Body'),
+                footer: record.get('Footer'),
+                status: record.get('Status'),
+                variableMapping: variableExamples
+            }
+        });
+
+    } catch (error: any) {
+        console.error("❌ Error creando plantilla:", error);
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+// ==========================================
+//  RUTAS EXISTENTES (MEDIA, UPLOAD, WEBHOOK)
+// ==========================================
 
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
@@ -105,6 +207,8 @@ app.post('/webhook', async (req, res) => {
   } catch (e) { res.sendStatus(500); }
 });
 
+// --- HELPER FUNCTIONS ---
+
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
   if (!base) return;
   const cleanPhone = cleanNumber(phone); 
@@ -129,6 +233,10 @@ async function saveAndEmitMessage(msg: any) {
     } catch (e) { console.error("Error guardando:", e); }
   }
 }
+
+// ==========================================
+//  SOCKET.IO LOGIC
+// ==========================================
 
 io.on('connection', (socket) => {
   socket.on('request_config', async () => {
@@ -228,8 +336,6 @@ io.on('connection', (socket) => {
       } catch (e) { console.error(e); socket.emit('action_error', 'Error al actualizar'); }
   });
 
-  // --- MAPEO DE CONTACTOS ---
-  // AÑADIDO: 'signup_date'
   socket.on('request_contacts', async () => { if (base) { try { const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', records.map(r => { const avatarField = r.get('avatar') as any[]; let rawMsg = r.get('last_message'); let cleanMsg = ""; if (typeof rawMsg === 'string') cleanMsg = rawMsg; else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]); else if (rawMsg) cleanMsg = String(rawMsg); return { id: r.id, phone: (r.get('phone') as string) || "", name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido", status: (r.get('status') as string) || "Nuevo", department: (r.get('department') as string) || "", assigned_to: (r.get('assigned_to') as string) || "", last_message: cleanMsg, last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null, email: (r.get('email') as string) || "", address: (r.get('address') as string) || "", notes: (r.get('notes') as string) || "", signup_date: (r.get('signup_date') as string) || "" }; })); } catch (e) { console.error("Error contacts:", e); } } });
   
   socket.on('request_conversation', async (phone) => { if (base) { const cleanPhone = cleanNumber(phone); const records = await base('Messages').select({ filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', records.map(r => ({ text: (r.get('text') as string) || "", sender: (r.get('sender') as string) || "", timestamp: (r.get('timestamp') as string) || "", type: (r.get('type') as string) || "text", mediaId: (r.get('media_id') as string) || "" }))); } });
@@ -266,7 +372,7 @@ io.on('connection', (socket) => {
                   text: msg.text, 
                   sender: msg.sender, 
                   recipient: targetPhone, 
-                  timestamp: new Date().toISOString(),
+                  timestamp: new Date().toISOString(), 
                   type: msg.type || 'text' 
               }); 
               
@@ -305,4 +411,4 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => { console.log(`🚀 Listo ${PORT}`); });
+httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo en puerto ${PORT}`); });
