@@ -9,7 +9,6 @@ interface ChatWindowProps {
   contact: Contact;
   config?: { departments: string[]; statuses: string[]; };
   onBack: () => void;
-  // Props de estado global
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
 }
@@ -49,34 +48,22 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
-  // USAMOS LAS PROPS QUE VIENEN DE APP
   const typingUser = typingInfo[contact.phone] || null;
   
-  // LÓGICA DE COINCIDENCIA MÁS FLEXIBLE (Para que "Paco" coincida con "Paco el talleres")
-  const isOnline = onlineUsers.some(onlineUser => {
-      if (!onlineUser) return false;
-      const u = onlineUser.toLowerCase().trim();
-      const cName = (contact.name || '').toLowerCase().trim();
-      const cPhone = (contact.phone || '').replace(/\D/g, ''); // Solo números
-
-      // 1. Coincidencia exacta de nombre
-      if (cName && u === cName) return true;
+  // VERIFICACIÓN ROBUSTA DE ONLINE (Nombre o Teléfono)
+  const isOnline = onlineUsers.some(u => {
+      if (!u) return false;
+      const userLower = u.toLowerCase().trim();
+      const contactName = (contact.name || '').toLowerCase().trim();
+      const contactPhone = (contact.phone || '').replace(/\D/g, ''); // Limpiar el número
       
-      // 2. Coincidencia parcial (útil si el contacto es "Paco" y el login es "Paco el talleres")
-      if (cName.length > 3 && (u.includes(cName) || cName.includes(u))) return true;
-
-      // 3. Coincidencia por teléfono (si el usuario se loguea con el número)
-      if (cPhone && u === cPhone) return true;
-
+      // Coincide por nombre
+      if (contactName && userLower === contactName) return true;
+      // Coincide por teléfono (si el usuario se logueó con el número)
+      if (contactPhone && userLower === contactPhone) return true;
+      
       return false;
   });
-
-  // DEBUG: Abre la consola del navegador (F12) para ver por qué no coincide
-  useEffect(() => {
-      console.log(`🔍 Revisando estado online para: "${contact.name}" (${contact.phone})`);
-      console.log(`📋 Usuarios conectados (Frontend):`, onlineUsers);
-      console.log(`✅ ¿Está online?:`, isOnline ? 'SÍ' : 'NO');
-  }, [onlineUsers, contact, isOnline]);
 
   const lastTypingTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -108,6 +95,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
+        
         return () => { 
             socket.off('conversation_history', handleHistory); 
             socket.off('message', handleNewMessage); 
@@ -117,6 +105,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
+      
       const now = Date.now();
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
@@ -147,14 +136,12 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
         
-        {/* HEADER: Nombre y Estado */}
         <div className="flex flex-col flex-1 min-w-[140px]">
             <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                 <User className="w-4 h-4 text-slate-400" />
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
             </div>
             
-            {/* ESTADO CON DISEÑO ORIGINAL */}
             <div className={`overflow-hidden transition-all duration-300 ${(typingUser || isOnline) ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                 {typingUser ? (
                     <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit">

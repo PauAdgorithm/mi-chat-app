@@ -19,7 +19,6 @@ interface SidebarProps {
   onSelectContact: (contact: Contact) => void;
   selectedContactId?: string;
   isConnected?: boolean;
-  // NUEVOS PROPS
   onlineUsers: string[];
   typingStatus: { [chatId: string]: string };
 }
@@ -102,6 +101,19 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       return true;
   });
 
+  // Helper para verificar estado online de forma flexible
+  const checkOnline = (contact: Contact) => {
+      if (!onlineUsers || onlineUsers.length === 0) return false;
+      const cName = (contact.name || "").toLowerCase().trim();
+      const cPhone = (contact.phone || "").replace(/\D/g, "");
+      
+      return onlineUsers.some(u => {
+          const user = u.toLowerCase().trim();
+          // Coincidencia exacta de nombre o teléfono
+          return (cName && user === cName) || (cPhone && user === cPhone);
+      });
+  };
+
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       <div className="p-4 border-b border-gray-200 bg-white">
@@ -127,26 +139,25 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         ) : (
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
-              // --- LÓGICA VISUAL DE ESTADO ---
               const isTyping = typingStatus[contact.phone];
-              const isOnline = onlineUsers.includes(contact.phone);
+              // Aquí usamos la nueva función robusta
+              const isOnline = checkOnline(contact);
 
               return (
                 <li key={contact.id || Math.random()}>
                   <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
                     
-                    {/* AVATAR + ONLINE DOT */}
+                    {/* AVATAR + PUNTO VERDE */}
                     <div className="relative">
                         <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
-                            {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
+                          {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
                         </div>
-                        {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
+                        {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full ring-2 ring-white"></span>}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-1"><span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span><span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span></div>
                       
-                      {/* PREVIEW MENSAJE o ESCRIBIENDO */}
                       <p className={`text-xs truncate h-4 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
                           {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
                       </p>
