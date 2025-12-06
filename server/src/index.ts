@@ -23,9 +23,9 @@ const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
 const waToken = process.env.WHATSAPP_TOKEN;
 const waPhoneId = process.env.WHATSAPP_PHONE_ID; 
+const waBusinessId = process.env.WHATSAPP_BUSINESS_ID; // Necesario para plantillas
 const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN; 
 
-// Nombre de la tabla de plantillas en Airtable
 const TABLE_TEMPLATES = 'Templates';
 
 // --- CONFIGURACIÓN AIRTABLE ---
@@ -37,7 +37,7 @@ if (airtableApiKey && airtableBaseId) {
     console.log("✅ Airtable configurado correctamente");
   } catch (e) { console.error("Error Airtable:", e); }
 } else {
-    console.error("❌ FALTA CONFIGURACIÓN: Revisa AIRTABLE_API_KEY y AIRTABLE_BASE_ID en tu .env o Render");
+    console.error("❌ FALTA CONFIGURACIÓN: Revisa AIRTABLE_API_KEY y AIRTABLE_BASE_ID");
 }
 
 const httpServer = createServer(app);
@@ -49,20 +49,15 @@ const onlineUsers = new Map<string, string>();
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 // ==========================================
-//  NUEVAS RUTAS: GESTIÓN DE PLANTILLAS
+//  RUTAS DE PLANTILLAS (CRUD)
 // ==========================================
 
-// 1. OBTENER PLANTILLAS (GET)
+// 1. OBTENER (GET)
 app.get('/api/templates', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
-    
-    console.log("📥 Petición recibida: GET /api/templates");
-
     try {
-        // Obtenemos todos los registros de la tabla Templates
         const records = await base(TABLE_TEMPLATES).select().all();
-
-        const formattedTemplates = records.map((record) => ({
+        const formatted = records.map((record) => ({
             id: record.id,
             name: (record.get('Name') as string) || '',
             category: (record.get('Category') as string) || 'MARKETING',
@@ -71,78 +66,103 @@ app.get('/api/templates', async (req, res) => {
             footer: (record.get('Footer') as string) || '',
             status: (record.get('Status') as string) || 'PENDING',
             metaId: (record.get('MetaId') as string) || '',
-            // Parseamos el JSON de variables si existe
             variableMapping: record.get('VariableMapping') 
-                ? JSON.parse(record.get('VariableMapping') as string) 
-                : {}
+                ? JSON.parse(record.get('VariableMapping') as string) : {}
         }));
-
-        res.json(formattedTemplates);
+        res.json(formatted);
     } catch (error: any) {
-        console.error("❌ Error obteniendo plantillas:", error);
-        // Si la tabla no existe en Airtable, avisamos
-        if (error.error === 'NOT_FOUND') {
-            return res.status(404).json({ error: "La tabla 'Templates' no existe en Airtable" });
-        }
-        res.status(500).json({ error: "Error interno", details: error.message });
+        console.error("❌ Error GET templates:", error);
+        res.status(500).json({ error: "Error interno" });
     }
 });
 
-// 2. CREAR PLANTILLA (POST)
+// 2. CREAR (POST) - ¡AHORA CONECTADO A META DE VERDAD!
 app.post('/api/create-template', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
-
-    console.log("📤 Petición recibida: POST /api/create-template", req.body.name);
 
     try {
         const { name, category, body, language, footer, variableExamples } = req.body;
         
-        // Simulamos ID de Meta (Aquí iría la llamada real a la API de WhatsApp Business)
-        const simuladoMetaId = "meta_" + Date.now();
+        let metaId = "meta_simulado_" + Date.now();
+        let status = "PENDING";
+
+        // --- INTENTO DE ENVÍO REAL A META ---
+        if (waToken && waBusinessId) {
+            try {
+                console.log("📤 Enviando plantilla a Meta API...");
+                const metaPayload: any = {
+                    name: name,
+                    category: category,
+                    allow_category_change: true,
+                    language: language,
+                    components: [
+                        { type: "BODY", text: body }
+                    ]
+                };
+                if (footer) metaPayload.components.push({ type: "FOOTER", text: footer });
+
+                const metaRes = await axios.post(
+                    `https://graph.facebook.com/v18.0/${waBusinessId}/message_templates`,
+                    metaPayload,
+                    { headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' } }
+                );
+                
+                metaId = metaRes.data.id;
+                status = metaRes.data.status || "PENDING";
+                console.log("✅ Plantilla creada en Meta ID:", metaId);
+            } catch (metaError: any) {
+                console.error("⚠️ Error Meta:", metaError.response?.data || metaError.message);
+                // No detenemos el proceso, guardamos en Airtable aunque falle Meta para que no pierdas el texto
+                // pero marcamos como REJECTED localmente para que sepas que falló.
+                status = "REJECTED"; 
+            }
+        }
 
         // Guardamos en Airtable
-        const createdRecords = await base(TABLE_TEMPLATES).create([
-            {
-                "fields": {
-                    "Name": name,
-                    "Category": category,
-                    "Language": language,
-                    "Body": body,
-                    "Footer": footer,
-                    "Status": "PENDING", // Siempre empieza pendiente
-                    "MetaId": simuladoMetaId,
-                    // Guardamos el objeto de variables como Texto JSON
-                    "VariableMapping": JSON.stringify(variableExamples || {})
-                }
+        const createdRecords = await base(TABLE_TEMPLATES).create([{
+            "fields": {
+                "Name": name, "Category": category, "Language": language,
+                "Body": body, "Footer": footer, "Status": status,
+                "MetaId": metaId, "VariableMapping": JSON.stringify(variableExamples || {})
             }
-        ]);
+        }]);
 
-        const record = createdRecords[0];
-
-        // Devolvemos el objeto creado al frontend
-        res.json({
-            success: true,
-            template: {
-                id: record.id,
-                name: record.get('Name'),
-                category: record.get('Category'),
-                language: record.get('Language'),
-                body: record.get('Body'),
-                footer: record.get('Footer'),
-                status: record.get('Status'),
-                variableMapping: variableExamples
-            }
-        });
+        res.json({ success: true, template: { id: createdRecords[0].id, name, category, language, body, footer, status, variableMapping: variableExamples } });
 
     } catch (error: any) {
-        console.error("❌ Error creando plantilla:", error);
+        console.error("❌ Error creando:", error);
         res.status(400).json({ success: false, error: error.message });
     }
 });
 
+// 3. ELIMINAR (DELETE) - NUEVA RUTA
+app.delete('/api/delete-template/:id', async (req, res) => {
+    if (!base) return res.status(500).json({ error: "Airtable no conectado" });
+    const { id } = req.params; // ID de Airtable, no de Meta
+    
+    // NOTA: Para borrar de Meta también, necesitaríamos el MetaId y llamar a su API DELETE.
+    // Por seguridad, primero borramos de local.
+    
+    try {
+        await base(TABLE_TEMPLATES).destroy([id]);
+        console.log("🗑️ Plantilla eliminada de Airtable:", id);
+        res.json({ success: true });
+    } catch (error: any) {
+        console.error("❌ Error eliminando:", error);
+        res.status(500).json({ error: "No se pudo eliminar" });
+    }
+});
+
 // ==========================================
-//  RUTAS EXISTENTES (MEDIA, UPLOAD, WEBHOOK)
+//  RESTO DE LA APP (MEDIA, UPLOAD, WEBHOOK...)
 // ==========================================
+// (El resto del código se mantiene igual, lo resumo para no copiar 200 líneas extra innecesarias)
+// Solo asegúrate de que las rutas anteriores no se borren.
+// ... 
+
+// Mantén aquí las rutas de /api/media, /api/upload, /webhook y toda la lógica de Socket.io
+// que tenías en el archivo anterior. Si copias y pegas, asegúrate de no perder esas funciones.
+// ...
 
 app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
@@ -203,6 +223,23 @@ app.post('/webhook', async (req, res) => {
         await handleContactUpdate(from, text, profileName);
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
+    // AQUÍ TAMBIÉN RECIBIMOS LOS CAMBIOS DE ESTADO DE PLANTILLAS
+    if (body.object && body.entry?.[0]?.changes?.[0]?.field === 'message_template_status_update') {
+        const event = body.entry[0].changes[0].value;
+        const metaId = event.message_template_id;
+        const newStatus = event.event; // APPROVED, REJECTED, etc.
+        console.log(`🔔 Cambio estado plantilla ${metaId}: ${newStatus}`);
+        // Actualizar en Airtable
+        if (base) {
+            try {
+                const records = await base(TABLE_TEMPLATES).select({ filterByFormula: `{MetaId} = '${metaId}'` }).firstPage();
+                if (records.length > 0) {
+                    await base(TABLE_TEMPLATES).update([{ id: records[0].id, fields: { "Status": newStatus } }]);
+                }
+            } catch(e) { console.error("Error actualizando estado plantilla:", e); }
+        }
+    }
+
     res.sendStatus(200);
   } catch (e) { res.sendStatus(500); }
 });
@@ -233,10 +270,6 @@ async function saveAndEmitMessage(msg: any) {
     } catch (e) { console.error("Error guardando:", e); }
   }
 }
-
-// ==========================================
-//  SOCKET.IO LOGIC
-// ==========================================
 
 io.on('connection', (socket) => {
   socket.on('request_config', async () => {
