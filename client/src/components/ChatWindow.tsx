@@ -51,8 +51,23 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   
   // USAMOS LAS PROPS QUE VIENEN DE APP
   const typingUser = typingInfo[contact.phone] || null;
-  // MODIFICADO: Comprobamos si está online por teléfono O por nombre (útil para pruebas locales)
-  const isOnline = onlineUsers.includes(contact.phone) || (contact.name && onlineUsers.includes(contact.name));
+  
+  // MEJORA: Comprobación robusta (ignora mayúsculas/minúsculas y valida undefined)
+  const isOnline = onlineUsers.some(onlineUser => 
+      onlineUser.toLowerCase() === contact.phone.toLowerCase() || 
+      (contact.name && onlineUser.toLowerCase() === contact.name.toLowerCase())
+  );
+
+  // DEBUG: Esto mostrará en la consola del navegador quién está conectado realmente
+  useEffect(() => {
+      console.log(`🕵️ Estado Online para chat ${contact.name || contact.phone}:`, {
+          estaOnline: isOnline,
+          listaUsuariosConectados: onlineUsers,
+          coincidePorTelefono: onlineUsers.some(u => u.toLowerCase() === contact.phone.toLowerCase()),
+          // Corrección: Usamos 'contact.name!' porque ya hemos verificado 'contact.name ?' antes
+          coincidePorNombre: contact.name ? onlineUsers.some(u => u.toLowerCase() === contact.name!.toLowerCase()) : false
+      });
+  }, [onlineUsers, contact, isOnline]);
 
   const lastTypingTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -81,8 +96,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         }
     };
     
-    // NOTA: El listener 'remote_typing' ya no es necesario aquí porque lo gestiona App.tsx
-
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
@@ -145,14 +158,14 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                         </span>
                         {typingUser} está escribiendo...
                     </span>
-                ) : (
+                ) : isOnline ? (
                     <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit">
                         <span className="relative flex h-2 w-2">
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                         </span>
                         En línea
                     </span>
-                )}
+                ) : null}
             </div>
         </div>
         
