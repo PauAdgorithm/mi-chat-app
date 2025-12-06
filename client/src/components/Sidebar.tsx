@@ -39,6 +39,13 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     }
   }, [socket, isConnected]);
 
+  // Debug: Ver usuarios online recibidos en Sidebar
+  useEffect(() => {
+    if (onlineUsers.length > 0) {
+        console.log("👥 Sidebar recibió usuarios online:", onlineUsers);
+    }
+  }, [onlineUsers]);
+
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
     if (Notification.permission !== 'granted') Notification.requestPermission();
@@ -101,16 +108,28 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       return true;
   });
 
-  // Helper para verificar estado online de forma flexible
+  // HELPER MEJORADO: Coincidencia flexible (contiene o es igual)
   const checkOnline = (contact: Contact) => {
       if (!onlineUsers || onlineUsers.length === 0) return false;
+      
       const cName = (contact.name || "").toLowerCase().trim();
-      const cPhone = (contact.phone || "").replace(/\D/g, "");
+      const cPhone = (contact.phone || "").replace(/\D/g, ""); // Solo números
       
       return onlineUsers.some(u => {
-          const user = u.toLowerCase().trim();
-          // Coincidencia exacta de nombre o teléfono
-          return (cName && user === cName) || (cPhone && user === cPhone);
+          const userLogged = u.toLowerCase().trim();
+          
+          // 1. Coincidencia por teléfono (si el agente se loguea con móvil)
+          if (cPhone && userLogged === cPhone) return true;
+
+          // 2. Coincidencia por nombre (Flexible)
+          if (cName) {
+              // Exacta: "paco" === "paco"
+              if (userLogged === cName) return true;
+              // Parcial: "paco el talleres" incluye "paco"
+              if (cName.length > 2 && (userLogged.includes(cName) || cName.includes(userLogged))) return true;
+          }
+          
+          return false;
       });
   };
 
@@ -139,8 +158,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         ) : (
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
+              // --- LÓGICA VISUAL ---
               const isTyping = typingStatus[contact.phone];
-              // Aquí usamos la nueva función robusta
+              // Usamos la nueva verificación flexible
               const isOnline = checkOnline(contact);
 
               return (
@@ -152,7 +172,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                         <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
                           {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
                         </div>
-                        {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full ring-2 ring-white"></span>}
+                        {/* Indicador Online */}
+                        {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full ring-2 ring-white z-10"></span>}
                     </div>
 
                     <div className="flex-1 min-w-0">
