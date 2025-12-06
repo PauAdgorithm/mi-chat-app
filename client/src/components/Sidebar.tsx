@@ -11,7 +11,6 @@ export interface Contact {
   last_message?: any;
   last_message_time?: string;
   avatar?: string;
-  unread_count?: number; // Propiedad opcional por si viene del backend en futuro
 }
 
 interface SidebarProps {
@@ -26,12 +25,18 @@ interface SidebarProps {
 
 type FilterType = 'all' | 'mine' | 'dept' | 'unassigned';
 
+// Helper para limpiar teléfonos y asegurar coincidencias
+const normalizePhone = (phone: string) => {
+    if (!phone) return "";
+    return phone.replace(/\D/g, ""); // Elimina todo lo que no sea número (+, espacios, -)
+};
+
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {} }: SidebarProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Estado local para contar mensajes no leídos mientras la app está abierta
+  // Estado local para contar mensajes no leídos
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -42,12 +47,17 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     }
   }, [socket, isConnected]);
 
-  // Limpiar contador al seleccionar un contacto
+  // Limpiar contador al entrar en un chat
   useEffect(() => {
       if (selectedContactId) {
           const contact = contacts.find(c => c.id === selectedContactId);
           if (contact) {
-              setUnreadCounts(prev => ({ ...prev, [contact.phone]: 0 }));
+              const cleanP = normalizePhone(contact.phone);
+              setUnreadCounts(prev => {
+                  const newCounts = { ...prev };
+                  delete newCounts[cleanP]; // Borramos la entrada limpia
+                  return newCounts;
+              });
           }
       }
   }, [selectedContactId, contacts]);
@@ -68,33 +78,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
         
-        // Si NO soy yo, gestionar notificación y contador
         if (!isMe) {
-            // Sonido y notificación sistema
+            // Reproducir sonido
             audioRef.current?.play().catch(() => {});
-            if (Notification.permission === 'granted' && document.hidden) {
-                new Notification(`Mensaje de ${msg.sender}`, { body: msg.text, icon: '/vite.svg' });
-            }
+            
+            // Incrementar contador
+            const senderClean = normalizePhone(msg.sender);
+            
+            // Comprobar si NO es el chat que tengo abierto ahora mismo
+            // Buscamos el contacto activo en la lista para comparar su teléfono limpio
+            const currentContact = contacts.find(c => c.id === selectedContactId);
+            const currentContactPhoneClean = currentContact ? normalizePhone(currentContact.phone) : null;
 
-            // Incrementar contador si el chat NO está seleccionado actualmente
-            // Nota: msg.sender es el teléfono del contacto en mensajes entrantes
-            setUnreadCounts(prev => {
-                // Buscamos si el mensaje viene del contacto seleccionado actualmente
-                // Necesitamos buscar el contacto por teléfono para comparar con selectedContactId
-                const senderPhone = msg.sender;
-                const currentContact = contacts.find(c => c.id === selectedContactId);
-                
-                // Si estoy hablando con él ahora mismo, no subir contador
-                if (currentContact && currentContact.phone === senderPhone) {
-                    return prev;
-                }
-
-                // Si no, incrementar
-                return {
+            if (senderClean !== currentContactPhoneClean) {
+                setUnreadCounts(prev => ({
                     ...prev,
-                    [senderPhone]: (prev[senderPhone] || 0) + 1
-                };
-            });
+                    [senderClean]: (prev[senderClean] || 0) + 1
+                }));
+            }
         }
         socket.emit('request_contacts');
     };
@@ -111,7 +112,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
-  }, [socket, user.username, isConnected, selectedContactId, contacts]); // Añadido selectedContactId y contacts a deps
+  }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -136,6 +137,20 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       if (filter === 'unassigned') return !c.assigned_to && !c.department;
       return true;
   });
+
+  const checkOnline = (contact: Contact) => {
+      if (!onlineUsers || onlineUsers.length === 0) return false;
+      const cName = (contact.name || "").toLowerCase().trim();
+      
+      return onlineUsers.some(u => {
+          const userLogged = u.toLowerCase().trim();
+          if (cName) {
+              if (userLogged === cName) return true;
+              if (cName.length > 2 && (userLogged.includes(cName) || cName.includes(userLogged))) return true;
+          }
+          return false;
+      });
+  };
 
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
@@ -164,7 +179,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
               const isTyping = typingStatus[contact.phone];
-              const unread = unreadCounts[contact.phone] || 0;
+              // Usamos el teléfono normalizado para buscar en el mapa de contadores
+              const unread = unreadCounts[normalizePhone(contact.phone)] || 0;
 
               return (
                 <li key={contact.id || Math.random()}>
@@ -182,14 +198,14 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                           <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span>
                       </div>
                       
-                      <div className="flex justify-between items-center">
-                          <p className={`text-xs truncate h-4 flex-1 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
+                      <div className="flex justify-between items-center w-full">
+                          <p className={`text-xs truncate h-4 flex-1 pr-2 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
                               {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
                           </p>
                           
-                          {/* BADGE DE NO LEÍDOS */}
+                          {/* BADGE DE NO LEÍDOS - FORZADO VISUALMENTE */}
                           {unread > 0 && (
-                              <span className="ml-2 bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-sm animate-in zoom-in">
+                              <span className="flex-shrink-0 bg-red-500 text-white text-[10px] font-bold h-5 min-w-[20px] px-1 rounded-full flex items-center justify-center shadow-sm animate-in zoom-in">
                                   {unread > 99 ? '99+' : unread}
                               </span>
                           )}
@@ -209,7 +225,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {/* SECCIÓN NUEVA: VISUALIZADOR DE AGENTES ONLINE */}
       {onlineUsers.length > 0 && (
         <div className="bg-slate-50 border-t border-slate-200 p-3">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
