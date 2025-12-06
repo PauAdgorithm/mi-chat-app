@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 const WhatsAppTemplatesManager = () => {
-  const API_URL_BASE = 'http://localhost:3000/api';
+  const API_URL_BASE = 'https://chatgorithm-front-end.onrender.com/api';
 
   // Estado de plantillas (eliminado el tipo <any[]>)
   const [templates, setTemplates] = useState([]);
