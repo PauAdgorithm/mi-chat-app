@@ -285,17 +285,17 @@ const WhatsAppTemplatesManager = () => {
                 
                 <div className="grid md:grid-cols-3 gap-4">
                   <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-green-500"/> UTILIDAD</div>
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle2 size={16} className="text-green-500"/> UTILIDAD</div>
                     <p className="text-xs text-slate-500 mb-2">Transaccional / Informativo</p>
                     <p className="text-sm">Para informar de algo acordado: Citas, Pedidos listos, Facturas. <strong>No vendas nada aquí.</strong></p>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> MARKETING</div>
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle2 size={16} className="text-blue-500"/> MARKETING</div>
                     <p className="text-xs text-slate-500 mb-2">Promocional / Inicio</p>
                     <p className="text-sm">Ofertas, Felicitaciones o <strong>abrir conversación sin motivo específico</strong> (ej: "Buenos días").</p>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-purple-500"/> AUTENTICACIÓN</div>
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle2 size={16} className="text-purple-500"/> AUTENTICACIÓN</div>
                     <p className="text-xs text-slate-500 mb-2">Códigos OTP</p>
                     <p className="text-sm">Solo para enviar códigos de seguridad de un solo uso.</p>
                   </div>
