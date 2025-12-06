@@ -49,19 +49,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
   const typingUser = typingInfo[contact.phone] || null;
-  
-  // VERIFICACIÓN ROBUSTA DE ONLINE (Nombre o Teléfono)
   const isOnline = onlineUsers.some(u => {
       if (!u) return false;
       const userLower = u.toLowerCase().trim();
       const contactName = (contact.name || '').toLowerCase().trim();
-      const contactPhone = (contact.phone || '').replace(/\D/g, ''); // Limpiar el número
-      
-      // Coincide por nombre
+      const contactPhone = (contact.phone || '').replace(/\D/g, ''); 
       if (contactName && userLower === contactName) return true;
-      // Coincide por teléfono (si el usuario se logueó con el número)
       if (contactPhone && userLower === contactPhone) return true;
-      
       return false;
   });
 
@@ -105,7 +99,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
-      
       const now = Date.now();
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
@@ -128,6 +121,55 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
+
+  // --- LOGICA DE FECHAS ---
+  const getDateLabel = (dateString: string) => {
+      const date = new Date(dateString);
+      const today = new Date();
+      const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+
+      if (date.toDateString() === today.toDateString()) return "Hoy";
+      if (date.toDateString() === yesterday.toDateString()) return "Ayer";
+      return date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  const renderMessagesWithDateSeparators = () => {
+      // CORRECCIÓN: Tipamos explícitamente el array como elementos JSX
+      const result: JSX.Element[] = [];
+      let lastDateLabel = "";
+
+      messages.forEach((m, i) => {
+          const dateLabel = getDateLabel(m.timestamp);
+          
+          if (dateLabel !== lastDateLabel) {
+              result.push(
+                  <div key={`date-${dateLabel}-${i}`} className="flex justify-center my-4">
+                      <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-sm">
+                          {dateLabel}
+                      </span>
+                  </div>
+              );
+              lastDateLabel = dateLabel;
+          }
+
+          const isMe = m.sender !== contact.phone;
+          result.push(
+            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
+                {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
+                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
+                    {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
+                    : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
+                    : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
+                    : <p className="whitespace-pre-wrap break-words">{String(m.text || "")}</p>}
+                    <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
+                </div>
+              </div>
+            </div>
+          );
+      });
+      return result;
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
@@ -168,23 +210,10 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
       <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => setShowEmojiPicker(false)}>
         {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
-        {messages.map((m, i) => {
-          const isMe = m.sender !== contact.phone; 
-          return (
-            <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
-                {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
-                <div className={`p-3 rounded-xl shadow-sm text-sm relative text-slate-800 ${isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
-                    {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
-                    : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
-                    : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
-                    : <p className="whitespace-pre-wrap break-words">{String(m.text || "")}</p>}
-                    <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">{safeTime(m.timestamp)}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        
+        {/* RENDERIZADO DE MENSAJES CON FECHAS */}
+        {renderMessagesWithDateSeparators()}
+        
         <div ref={messagesEndRef} />
       </div>
       {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}

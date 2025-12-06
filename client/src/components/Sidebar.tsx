@@ -11,6 +11,7 @@ export interface Contact {
   last_message?: any;
   last_message_time?: string;
   avatar?: string;
+  unread_count?: number; // Propiedad opcional por si viene del backend en futuro
 }
 
 interface SidebarProps {
@@ -30,6 +31,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Estado local para contar mensajes no leídos mientras la app está abierta
+  const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -37,6 +41,16 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         socket.emit('request_contacts');
     }
   }, [socket, isConnected]);
+
+  // Limpiar contador al seleccionar un contacto
+  useEffect(() => {
+      if (selectedContactId) {
+          const contact = contacts.find(c => c.id === selectedContactId);
+          if (contact) {
+              setUnreadCounts(prev => ({ ...prev, [contact.phone]: 0 }));
+          }
+      }
+  }, [selectedContactId, contacts]);
 
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
@@ -53,11 +67,34 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
+        
+        // Si NO soy yo, gestionar notificación y contador
         if (!isMe) {
+            // Sonido y notificación sistema
             audioRef.current?.play().catch(() => {});
             if (Notification.permission === 'granted' && document.hidden) {
                 new Notification(`Mensaje de ${msg.sender}`, { body: msg.text, icon: '/vite.svg' });
             }
+
+            // Incrementar contador si el chat NO está seleccionado actualmente
+            // Nota: msg.sender es el teléfono del contacto en mensajes entrantes
+            setUnreadCounts(prev => {
+                // Buscamos si el mensaje viene del contacto seleccionado actualmente
+                // Necesitamos buscar el contacto por teléfono para comparar con selectedContactId
+                const senderPhone = msg.sender;
+                const currentContact = contacts.find(c => c.id === selectedContactId);
+                
+                // Si estoy hablando con él ahora mismo, no subir contador
+                if (currentContact && currentContact.phone === senderPhone) {
+                    return prev;
+                }
+
+                // Si no, incrementar
+                return {
+                    ...prev,
+                    [senderPhone]: (prev[senderPhone] || 0) + 1
+                };
+            });
         }
         socket.emit('request_contacts');
     };
@@ -74,7 +111,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
-  }, [socket, user.username, isConnected]);
+  }, [socket, user.username, isConnected, selectedContactId, contacts]); // Añadido selectedContactId y contacts a deps
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -127,7 +164,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
               const isTyping = typingStatus[contact.phone];
-              // NOTA: Eliminamos la lógica de 'isOnline' aquí porque los clientes NO están online en el sistema
+              const unread = unreadCounts[contact.phone] || 0;
 
               return (
                 <li key={contact.id || Math.random()}>
@@ -140,11 +177,23 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-baseline mb-1"><span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span><span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span></div>
+                      <div className="flex justify-between items-baseline mb-1">
+                          <span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span>
+                          <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span>
+                      </div>
                       
-                      <p className={`text-xs truncate h-4 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
-                          {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
-                      </p>
+                      <div className="flex justify-between items-center">
+                          <p className={`text-xs truncate h-4 flex-1 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
+                              {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
+                          </p>
+                          
+                          {/* BADGE DE NO LEÍDOS */}
+                          {unread > 0 && (
+                              <span className="ml-2 bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-sm animate-in zoom-in">
+                                  {unread > 99 ? '99+' : unread}
+                              </span>
+                          )}
+                      </div>
 
                       <div className="flex gap-1 mt-2 flex-wrap">
                           {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
