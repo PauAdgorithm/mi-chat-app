@@ -235,7 +235,44 @@ io.on('connection', (socket) => {
   socket.on('request_contacts', async () => { if (base) { try { const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', records.map(r => { const avatarField = r.get('avatar') as any[]; let rawMsg = r.get('last_message'); let cleanMsg = ""; if (typeof rawMsg === 'string') cleanMsg = rawMsg; else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]); else if (rawMsg) cleanMsg = String(rawMsg); return { id: r.id, phone: (r.get('phone') as string) || "", name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido", status: (r.get('status') as string) || "Nuevo", department: (r.get('department') as string) || "", assigned_to: (r.get('assigned_to') as string) || "", last_message: cleanMsg, last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null }; })); } catch (e) { console.error("Error contacts:", e); } } });
   socket.on('request_conversation', async (phone) => { if (base) { const cleanPhone = cleanNumber(phone); const records = await base('Messages').select({ filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', records.map(r => ({ text: (r.get('text') as string) || "", sender: (r.get('sender') as string) || "", timestamp: (r.get('timestamp') as string) || "", type: (r.get('type') as string) || "text", mediaId: (r.get('media_id') as string) || "" }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
-  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString() }); await handleContactUpdate(targetPhone, `Tú (${msg.sender}): ${msg.text}`); } catch (error: any) { console.error("Error envío:", error.message); } } });
+  
+  // --- MANEJO DE MENSAJES Y NOTAS INTERNAS ---
+  socket.on('chatMessage', async (msg) => { 
+      const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); 
+      
+      if (waToken && waPhoneId) { 
+          try { 
+              // PROTECCIÓN: Solo enviamos a WhatsApp si NO es una nota ('note')
+              // Y si es de tipo 'text' (o undefined que asumimos texto)
+              if (msg.type !== 'note') {
+                  await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { 
+                      messaging_product: "whatsapp", 
+                      to: targetPhone, 
+                      type: "text", 
+                      text: { body: msg.text } 
+                  }, { headers: { Authorization: `Bearer ${waToken}` } }); 
+              } else {
+                  console.log("📝 Nota interna guardada (No enviada a WhatsApp):", msg.text);
+              }
+
+              // Guardamos en DB y emitimos al Frontend SIEMPRE (para que los agentes lo vean)
+              await saveAndEmitMessage({ 
+                  text: msg.text, 
+                  sender: msg.sender, 
+                  recipient: targetPhone, 
+                  timestamp: new Date().toISOString(),
+                  type: msg.type || 'text' // Guardar el tipo correcto (note/text)
+              }); 
+              
+              // Actualizamos el "último mensaje" en el sidebar, indicando si es nota
+              const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`;
+              await handleContactUpdate(targetPhone, previewText); 
+
+          } catch (error: any) { 
+              console.error("Error envío:", error.message); 
+          } 
+      } 
+  });
 
   // --- LÓGICA DE USUARIOS ONLINE ---
   socket.on('register_presence', (username: string) => {
