@@ -58,6 +58,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [crmEmail, setCrmEmail] = useState('');
   const [crmAddress, setCrmAddress] = useState('');
   const [crmNotes, setCrmNotes] = useState('');
+  const [crmSignupDate, setCrmSignupDate] = useState(''); // Estado para la fecha
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -66,7 +67,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [showAssignMenu, setShowAssignMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false); 
   const [isInternalMode, setIsInternalMode] = useState(false); 
-  const [isSaving, setIsSaving] = useState(false); // Feedback visual guardar
+  const [isSaving, setIsSaving] = useState(false); 
 
   const typingUser = typingInfo[contact.phone] || null;
   const isOnline = onlineUsers.some(u => {
@@ -96,9 +97,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setDepartment(contact.department || ''); 
     setStatus(contact.status || '');
     setAssignedTo(contact.assigned_to || '');
+    
     setCrmEmail(contact.email || '');
     setCrmAddress(contact.address || '');
     setCrmNotes(contact.notes || '');
+    setCrmSignupDate(contact.signup_date || ''); // Inicializar fecha
     
     setMessages([]); 
     setShowEmojiPicker(false); 
@@ -108,7 +111,16 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setIsInternalMode(false);
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
-  }, [contact, socket]);
+  }, [contact.id, socket]); 
+
+  // Sync reactiva (excluyendo campos de texto largo para no interrumpir escritura)
+  useEffect(() => {
+      if (contact.name) setName(contact.name);
+      if (contact.department) setDepartment(contact.department);
+      if (contact.status) setStatus(contact.status);
+      if (contact.assigned_to) setAssignedTo(contact.assigned_to);
+      if (contact.signup_date) setCrmSignupDate(contact.signup_date);
+  }, [contact]); 
 
   useEffect(() => {
       if (socket) {
@@ -172,7 +184,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       }
   };
   
-  // Guardar notas con feedback visual
   const saveNotes = () => {
       updateCRM('notes', crmNotes);
       setIsSaving(true);
@@ -254,9 +265,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
-      {/* COLUMNA PRINCIPAL (CHAT) */}
       <div className="flex flex-col flex-1 min-w-0 h-full border-r border-gray-200">
-          {/* HEADER */}
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
             
@@ -285,33 +294,22 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             )}
 
             <div className="flex-1"></div>
-            {/* BOTÓN INFO */}
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
-          {/* LISTA MENSAJES */}
           <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
             {renderedItems}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* INPUT AREA */}
           {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'}`}>
             <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
               
-              {/* BOTÓN MODO NOTA INTERNA */}
-              <button 
-                type="button" 
-                onClick={() => setIsInternalMode(!isInternalMode)} 
-                className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} 
-                title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}
-              >
-                {isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}
-              </button>
+              <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 
               <input type="text" value={input} onChange={handleInputChange} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : (isInternalMode ? "Escribe una nota interna (solo equipo)..." : "Mensaje")} disabled={isUploading || isRecording} className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none focus:border-blue-300 text-sm transition-colors ${isInternalMode ? 'bg-yellow-100 border-yellow-300 placeholder-yellow-600/50 text-yellow-900' : 'bg-slate-50 border-slate-200'}`} />
               
@@ -321,7 +319,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           </div>
       </div>
 
-      {/* PANEL LATERAL DE DETALLES (DRAWER) */}
       {showDetailsPanel && (
           <div className="w-80 bg-white border-l border-gray-200 shadow-xl flex flex-col h-full animate-in slide-in-from-right duration-300 shrink-0 z-30">
               <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
@@ -329,7 +326,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                   <button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                  {/* Tarjeta Perfil */}
                   <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-3 border-4 border-white shadow-sm">
                           {contact.avatar ? <img src={contact.avatar} className="w-full h-full rounded-full object-cover"/> : <User className="w-10 h-10"/>}
@@ -338,63 +334,37 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
 
-                  {/* Datos Editables */}
                   <div className="space-y-4">
                       <div>
                           <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label>
                           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                               <Mail className="w-4 h-4 text-slate-400"/>
-                              <input 
-                                className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" 
-                                placeholder="cliente@email.com"
-                                value={crmEmail}
-                                onChange={(e) => setCrmEmail(e.target.value)}
-                                onBlur={() => updateCRM('email', crmEmail)} 
-                              />
+                              <input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} />
                           </div>
                       </div>
                       <div>
                           <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label>
                           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                               <MapPin className="w-4 h-4 text-slate-400"/>
-                              <input 
-                                className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" 
-                                placeholder="Calle Ejemplo 123" 
-                                value={crmAddress}
-                                onChange={(e) => setCrmAddress(e.target.value)}
-                                onBlur={() => updateCRM('address', crmAddress)}
-                              />
+                              <input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/>
                           </div>
                       </div>
                       <div>
                           <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Fecha Alta</label>
                           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                               <Calendar className="w-4 h-4 text-slate-400"/>
-                              <span className="text-sm text-slate-600">12 Oct 2023</span>
+                              <input type="date" className="bg-transparent w-full text-sm outline-none text-slate-700 cursor-pointer" value={crmSignupDate} onChange={(e) => setCrmSignupDate(e.target.value)} onBlur={() => updateCRM('signup_date', crmSignupDate)} />
                           </div>
                       </div>
                   </div>
 
-                  {/* Notas CRM */}
                   <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
                       <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2 text-yellow-700 font-bold text-xs uppercase">
-                              <StickyNote className="w-4 h-4"/> Notas Privadas
-                          </div>
+                          <div className="flex items-center gap-2 text-yellow-700 font-bold text-xs uppercase"><StickyNote className="w-4 h-4"/> Notas Privadas</div>
                           {isSaving && <span className="text-[10px] text-green-600 font-bold animate-pulse">Guardado</span>}
                       </div>
-                      <textarea 
-                        className="w-full bg-white/50 border border-yellow-200 rounded-lg p-2 text-sm text-slate-700 outline-none focus:bg-white transition-colors resize-none h-32"
-                        placeholder="Escribe notas sobre el cliente..."
-                        value={crmNotes}
-                        onChange={(e) => setCrmNotes(e.target.value)}
-                      />
-                      <button 
-                        onClick={saveNotes}
-                        className="mt-2 w-full bg-yellow-200 hover:bg-yellow-300 text-yellow-800 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1 transition-colors"
-                      >
-                          <Save className="w-3 h-3"/> Guardar Notas
-                      </button>
+                      <textarea className="w-full bg-white/50 border border-yellow-200 rounded-lg p-2 text-sm text-slate-700 outline-none focus:bg-white transition-colors resize-none h-32" placeholder="Escribe notas sobre el cliente..." value={crmNotes} onChange={(e) => setCrmNotes(e.target.value)}/>
+                      <button onClick={saveNotes} className="mt-2 w-full bg-yellow-200 hover:bg-yellow-300 text-yellow-800 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1 transition-colors"><Save className="w-3 h-3"/> Guardar Notas</button>
                   </div>
               </div>
           </div>

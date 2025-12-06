@@ -11,10 +11,10 @@ export interface Contact {
   last_message?: any;
   last_message_time?: string;
   avatar?: string;
-  // CAMPOS CRM NUEVOS
   email?: string;
   address?: string;
   notes?: string;
+  signup_date?: string; // AÑADIDO
 }
 
 // Interfaces para los desplegables
