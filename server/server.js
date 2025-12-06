@@ -7,24 +7,33 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración Airtable
-// Asegúrate de tener estas variables en tu archivo .env
+// Verificación de seguridad al iniciar
+if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+  console.error("CRITICAL ERROR: Faltan las variables de entorno de Airtable.");
+}
+
 const base = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
 const TABLE_NAME = 'Templates';
 
 app.use(cors()); 
 app.use(bodyParser.json());
 
+// --- RUTA DE PRUEBA (Para ver si el servidor responde) ---
+app.get('/api/health', (req, res) => {
+  res.send('Servidor funcionando correctamente');
+});
+
 // --- RUTA 1: OBTENER PLANTILLAS (GET) ---
 app.get('/api/templates', async (req, res) => {
+  console.log("Intentando obtener plantillas de Airtable...");
   try {
-    const records = await base(TABLE_NAME).select({
-      sort: [{ field: "Created", direction: "desc" }] // Opcional: crea campo 'Created' tipo 'Created time' si quieres ordenar
-    }).all();
+    // HE QUITADO EL SORT "Created" PARA EVITAR ERRORES SI NO EXISTE LA COLUMNA
+    const records = await base(TABLE_NAME).select().all();
 
-    // Mapeamos el formato de Airtable al formato que espera tu React
+    console.log(`Éxito: Se encontraron ${records.length} plantillas.`);
+
     const formattedTemplates = records.map(record => ({
-      id: record.id, // ID interno de Airtable (recXXXXXXXX)
+      id: record.id,
       name: record.get('Name') || '',
       category: record.get('Category') || 'MARKETING',
       language: record.get('Language') || 'es',
@@ -32,27 +41,26 @@ app.get('/api/templates', async (req, res) => {
       footer: record.get('Footer') || '',
       status: record.get('Status') || 'PENDING',
       metaId: record.get('MetaId'),
-      // Parseamos el JSON de variables
       variableMapping: record.get('VariableMapping') ? JSON.parse(record.get('VariableMapping')) : {}
     }));
 
     res.json(formattedTemplates);
   } catch (error) {
-    console.error("Error Airtable:", error);
-    res.status(500).json({ error: "No se pudieron cargar las plantillas" });
+    console.error("ERROR GRAVE AIRTABLE:", error); // Esto saldrá en los logs de Render
+    res.status(500).json({ 
+      error: "Error interno al conectar con Airtable", 
+      details: error.message 
+    });
   }
 });
 
 // --- RUTA 2: CREAR PLANTILLA (POST) ---
 app.post('/api/create-template', async (req, res) => {
+  console.log("Recibida petición para crear plantilla:", req.body.name);
   try {
     const { name, category, body, language, footer, variableExamples } = req.body;
-    
-    // 1. Aquí iría la llamada a la API de Meta para registrarla oficialmente
-    // const metaResponse = await axios.post(...)
     const simuladoMetaId = "meta_" + Date.now();
 
-    // 2. Guardar en Airtable
     const createdRecords = await base(TABLE_NAME).create([
       {
         "fields": {
@@ -61,16 +69,16 @@ app.post('/api/create-template', async (req, res) => {
           "Language": language,
           "Body": body,
           "Footer": footer,
-          "Status": "PENDING", // Por defecto
+          "Status": "PENDING",
           "MetaId": simuladoMetaId,
-          "VariableMapping": JSON.stringify(variableExamples || {}) // Guardamos objeto como texto
+          "VariableMapping": JSON.stringify(variableExamples || {})
         }
       }
     ]);
 
     const record = createdRecords[0];
+    console.log("Plantilla creada en Airtable con ID:", record.id);
 
-    // 3. Responder al Frontend
     res.json({
       success: true,
       template: {
@@ -86,11 +94,11 @@ app.post('/api/create-template', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error creando en Airtable:", error);
+    console.error("ERROR AL CREAR EN AIRTABLE:", error);
     res.status(400).json({ success: false, error: error.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor Airtable corriendo en http://localhost:${PORT}`);
+  console.log(`Servidor Airtable corriendo en el puerto ${PORT}`);
 });
