@@ -55,15 +55,18 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
   const [assignedTo, setAssignedTo] = useState(contact.assigned_to || '');
-  const [crmNotes, setCrmNotes] = useState(''); // Notas del panel lateral
+  const [crmEmail, setCrmEmail] = useState('');
+  const [crmAddress, setCrmAddress] = useState('');
+  const [crmNotes, setCrmNotes] = useState('');
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   
   // ESTADOS DE UI
   const [showAssignMenu, setShowAssignMenu] = useState(false);
-  const [showDetailsPanel, setShowDetailsPanel] = useState(false); // Panel lateral
-  const [isInternalMode, setIsInternalMode] = useState(false); // Modo nota interna
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false); 
+  const [isInternalMode, setIsInternalMode] = useState(false); 
+  const [isSaving, setIsSaving] = useState(false); // Feedback visual guardar
 
   const typingUser = typingInfo[contact.phone] || null;
   const isOnline = onlineUsers.some(u => {
@@ -93,14 +96,16 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setDepartment(contact.department || ''); 
     setStatus(contact.status || '');
     setAssignedTo(contact.assigned_to || '');
-    // Resetear estados al cambiar de chat
+    setCrmEmail(contact.email || '');
+    setCrmAddress(contact.address || '');
+    setCrmNotes(contact.notes || '');
+    
     setMessages([]); 
     setShowEmojiPicker(false); 
     setIsRecording(false);
     setShowAssignMenu(false); 
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
-    setCrmNotes(""); 
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
@@ -125,11 +130,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        
-        return () => { 
-            socket.off('conversation_history', handleHistory); 
-            socket.off('message', handleNewMessage); 
-        };
+        return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); };
     }
   }, [socket, contact.phone]);
 
@@ -150,14 +151,12 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           sender: user.username, 
           targetPhone: contact.phone, 
           timestamp: new Date().toISOString(), 
-          type: isInternalMode ? 'note' : 'text'  // Tipo dinámico
+          type: isInternalMode ? 'note' : 'text'
       };
-      
       socket.emit('chatMessage', msg); 
-      
       setInput(''); 
       setShowEmojiPicker(false);
-      setIsInternalMode(false); // Resetear modo tras enviar
+      setIsInternalMode(false); 
     }
   };
 
@@ -171,6 +170,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           }
           socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); 
       }
+  };
+  
+  // Guardar notas con feedback visual
+  const saveNotes = () => {
+      updateCRM('notes', crmNotes);
+      setIsSaving(true);
+      setTimeout(() => setIsSaving(false), 2000);
   };
   
   const handleAssign = (target: 'me' | string) => {
@@ -231,18 +237,12 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
             {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
             
-            {/* RENDERIZADO CONDICIONAL DE MENSAJE O NOTA */}
-            <div className={`p-3 rounded-xl shadow-sm text-sm relative 
-                ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : 
-                  isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
-                
+            <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
-
                 {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
                 : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                 : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
                 : <p className="whitespace-pre-wrap break-words">{String(m.text || "")}</p>}
-                
                 <span className={`text-[10px] block text-right mt-1 opacity-70 ${isNote ? 'text-yellow-600' : 'text-slate-400'}`}>{safeTime(m.timestamp)}</span>
             </div>
           </div>
@@ -260,20 +260,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
             
-            {/* NOMBRE DEL CLIENTE */}
             <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                     <User className="w-4 h-4 text-slate-400" />
                     <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
                 </div>
-                
                 <div className={`overflow-hidden transition-all duration-300 ${(typingUser || isOnline) ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> 
                     : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
             
-            {/* ESTADOS / ASIGNACION */}
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -347,14 +344,26 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                           <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label>
                           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                               <Mail className="w-4 h-4 text-slate-400"/>
-                              <input className="bg-transparent w-full text-sm outline-none text-slate-700" placeholder="cliente@email.com" />
+                              <input 
+                                className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" 
+                                placeholder="cliente@email.com"
+                                value={crmEmail}
+                                onChange={(e) => setCrmEmail(e.target.value)}
+                                onBlur={() => updateCRM('email', crmEmail)} 
+                              />
                           </div>
                       </div>
                       <div>
                           <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label>
                           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                               <MapPin className="w-4 h-4 text-slate-400"/>
-                              <input className="bg-transparent w-full text-sm outline-none text-slate-700" placeholder="Calle Ejemplo 123" />
+                              <input 
+                                className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" 
+                                placeholder="Calle Ejemplo 123" 
+                                value={crmAddress}
+                                onChange={(e) => setCrmAddress(e.target.value)}
+                                onBlur={() => updateCRM('address', crmAddress)}
+                              />
                           </div>
                       </div>
                       <div>
@@ -368,8 +377,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
                   {/* Notas CRM */}
                   <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
-                      <div className="flex items-center gap-2 mb-2 text-yellow-700 font-bold text-xs uppercase">
-                          <StickyNote className="w-4 h-4"/> Notas Privadas
+                      <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 text-yellow-700 font-bold text-xs uppercase">
+                              <StickyNote className="w-4 h-4"/> Notas Privadas
+                          </div>
+                          {isSaving && <span className="text-[10px] text-green-600 font-bold animate-pulse">Guardado</span>}
                       </div>
                       <textarea 
                         className="w-full bg-white/50 border border-yellow-200 rounded-lg p-2 text-sm text-slate-700 outline-none focus:bg-white transition-colors resize-none h-32"
@@ -377,7 +389,10 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                         value={crmNotes}
                         onChange={(e) => setCrmNotes(e.target.value)}
                       />
-                      <button className="mt-2 w-full bg-yellow-200 hover:bg-yellow-300 text-yellow-800 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1 transition-colors">
+                      <button 
+                        onClick={saveNotes}
+                        className="mt-2 w-full bg-yellow-200 hover:bg-yellow-300 text-yellow-800 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1 transition-colors"
+                      >
                           <Save className="w-3 h-3"/> Guardar Notas
                       </button>
                   </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, RefreshCw, UserCheck, Briefcase, Filter, User, ChevronDown, X } from 'lucide-react';
+import { Users, Search, RefreshCw, UserCheck, Briefcase, Filter, User, ChevronDown, X } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -11,6 +11,10 @@ export interface Contact {
   last_message?: any;
   last_message_time?: string;
   avatar?: string;
+  // CAMPOS CRM NUEVOS
+  email?: string;
+  address?: string;
+  notes?: string;
 }
 
 // Interfaces para los desplegables
@@ -42,7 +46,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   
   // ESTADOS DE FILTRO
   const [filter, setFilter] = useState<FilterType>('all');
-  const [filterValue, setFilterValue] = useState<string>(''); // Guarda el nombre del agente o dpto seleccionado
+  const [filterValue, setFilterValue] = useState<string>(''); 
   
   // DATOS PARA LISTAS DESPLEGABLES
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
@@ -55,8 +59,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
-        socket.emit('request_agents'); // Pedimos agentes para el filtro
-        socket.emit('request_config'); // Pedimos config para los deptos
+        socket.emit('request_agents'); 
+        socket.emit('request_config'); 
     }
   }, [socket, isConnected]);
 
@@ -95,8 +99,8 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     // --- LISTENERS ---
     socket.on('contacts_update', handleContactsUpdate);
-    socket.on('agents_list', handleAgentsList);     // Recibir agentes
-    socket.on('config_list', handleConfigList);     // Recibir deptos
+    socket.on('agents_list', handleAgentsList);     
+    socket.on('config_list', handleConfigList);     
     socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
 
     const handleNewMessageNotification = (msg: any) => {
@@ -130,7 +134,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
-  // --- HELPERS ---
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
@@ -145,45 +148,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  const checkOnline = (contact: Contact) => {
-      if (!onlineUsers || onlineUsers.length === 0) return false;
-      const cName = (contact.name || "").toLowerCase().trim();
-      return onlineUsers.some(u => {
-          const userLogged = u.toLowerCase().trim();
-          // Solo comprobamos por nombre, ya que es "Equipo Online"
-          if (cName) {
-              if (userLogged === cName) return true;
-              if (cName.length > 2 && (userLogged.includes(cName) || cName.includes(userLogged))) return true;
-          }
-          return false;
-      });
-  };
-
-  // --- LÓGICA DE FILTRADO MAESTRA ---
   const filteredContacts = contacts.filter(c => {
-      // 1. Filtro de búsqueda (Texto)
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // 2. Filtro de Categoría
       if (filter === 'all') return true;
       if (filter === 'mine') return c.assigned_to === user.username;
       if (filter === 'unassigned') return !c.assigned_to;
       
-      // 3. Filtros avanzados
       if (filter === 'agent') return c.assigned_to === filterValue;
       if (filter === 'department') return c.department === filterValue;
 
       return true;
   });
 
-  // Manejador para botones de filtro
   const handleFilterClick = (type: FilterType) => {
-      if (filter === type && (type === 'all' || type === 'mine' || type === 'unassigned')) return; // No hacer nada si ya está activo
+      if (filter === type && (type === 'all' || type === 'mine' || type === 'unassigned')) return; 
       setFilter(type);
-      // Resetear valor si cambiamos a un modo que no usa selector secundario
       if (type === 'all' || type === 'mine' || type === 'unassigned') setFilterValue('');
-      // Si entramos en agente o dpto, ponemos el primero por defecto si hay lista
       if (type === 'agent' && availableAgents.length > 0) setFilterValue(availableAgents[0].name);
       if (type === 'department' && availableDepts.length > 0) setFilterValue(availableDepts[0]);
   };
@@ -209,7 +191,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             <button onClick={() => handleFilterClick('mine')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center gap-1 ${filter === 'mine' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}><UserCheck className="w-3 h-3" /> Míos</button>
             <button onClick={() => handleFilterClick('unassigned')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all ${filter === 'unassigned' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Libres</button>
             
-            {/* Botones de filtro avanzado */}
             <button onClick={() => handleFilterClick('agent')} className={`flex-shrink-0 px-2 py-1.5 rounded-lg transition-all ${filter === 'agent' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} title="Por Agente">
                 <User className="w-4 h-4" />
             </button>
@@ -218,7 +199,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             </button>
         </div>
 
-        {/* SELECTOR SECUNDARIO (Solo aparece si eliges Agente o Dpto) */}
+        {/* SELECTOR SECUNDARIO */}
         {(filter === 'agent' || filter === 'department') && (
             <div className="mt-3 animate-in slide-in-from-top-2 fade-in duration-200">
                 <div className="relative">
@@ -235,11 +216,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                     </select>
                     <ChevronDown className={`absolute right-2 top-2.5 w-4 h-4 ${filter === 'agent' ? 'text-purple-400' : 'text-pink-400'}`} />
                     
-                    {/* Botón para cerrar filtro avanzado */}
-                    <button 
-                        onClick={() => setFilter('all')} 
-                        className="absolute -right-2 -top-8 bg-slate-200 rounded-full p-1 text-slate-500 hover:bg-slate-300 md:hidden"
-                    >
+                    <button onClick={() => setFilter('all')} className="absolute -right-2 -top-8 bg-slate-200 rounded-full p-1 text-slate-500 hover:bg-slate-300 md:hidden">
                         <X className="w-3 h-3"/>
                     </button>
                 </div>
@@ -247,7 +224,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
       
-      {/* LISTA DE CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
@@ -261,7 +237,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             {filteredContacts.map((contact) => {
               const isTyping = typingStatus[contact.phone];
               const unread = unreadCounts[normalizePhone(contact.phone)] || 0;
-              // Aquí no usamos isOnline para contactos (clientes), solo para agentes abajo
 
               return (
                 <li key={contact.id || Math.random()}>
@@ -305,7 +280,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {/* FOOTER: EQUIPO ONLINE */}
       {onlineUsers.length > 0 && (
         <div className="bg-slate-50 border-t border-slate-200 p-3">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">

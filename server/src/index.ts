@@ -232,9 +232,21 @@ io.on('connection', (socket) => {
       } catch (e) { console.error(e); socket.emit('action_error', 'Error al actualizar'); }
   });
 
-  socket.on('request_contacts', async () => { if (base) { try { const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', records.map(r => { const avatarField = r.get('avatar') as any[]; let rawMsg = r.get('last_message'); let cleanMsg = ""; if (typeof rawMsg === 'string') cleanMsg = rawMsg; else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]); else if (rawMsg) cleanMsg = String(rawMsg); return { id: r.id, phone: (r.get('phone') as string) || "", name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido", status: (r.get('status') as string) || "Nuevo", department: (r.get('department') as string) || "", assigned_to: (r.get('assigned_to') as string) || "", last_message: cleanMsg, last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null }; })); } catch (e) { console.error("Error contacts:", e); } } });
+  socket.on('request_contacts', async () => { if (base) { try { const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', records.map(r => { const avatarField = r.get('avatar') as any[]; let rawMsg = r.get('last_message'); let cleanMsg = ""; if (typeof rawMsg === 'string') cleanMsg = rawMsg; else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]); else if (rawMsg) cleanMsg = String(rawMsg); return { id: r.id, phone: (r.get('phone') as string) || "", name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido", status: (r.get('status') as string) || "Nuevo", department: (r.get('department') as string) || "", assigned_to: (r.get('assigned_to') as string) || "", last_message: cleanMsg, last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null, email: (r.get('email') as string) || "", address: (r.get('address') as string) || "", notes: (r.get('notes') as string) || "" }; })); } catch (e) { console.error("Error contacts:", e); } } });
   socket.on('request_conversation', async (phone) => { if (base) { const cleanPhone = cleanNumber(phone); const records = await base('Messages').select({ filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', records.map(r => ({ text: (r.get('text') as string) || "", sender: (r.get('sender') as string) || "", timestamp: (r.get('timestamp') as string) || "", type: (r.get('type') as string) || "text", mediaId: (r.get('media_id') as string) || "" }))); } });
-  socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
+  
+  // --- ACTUALIZACIÓN DE CONTACTOS (CRM) ---
+  socket.on('update_contact_info', async (data) => { 
+      if(base) { 
+          const cleanPhone = cleanNumber(data.phone); 
+          console.log(`📝 Actualizando CRM para ${cleanPhone}:`, data.updates); // LOG AÑADIDO
+          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); 
+          if (records.length > 0) { 
+              await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); 
+              io.emit('contact_updated_notification'); 
+          } 
+      } 
+  });
   
   // --- MANEJO DE MENSAJES Y NOTAS INTERNAS ---
   socket.on('chatMessage', async (msg) => { 
@@ -242,8 +254,6 @@ io.on('connection', (socket) => {
       
       if (waToken && waPhoneId) { 
           try { 
-              // PROTECCIÓN: Solo enviamos a WhatsApp si NO es una nota ('note')
-              // Y si es de tipo 'text' (o undefined que asumimos texto)
               if (msg.type !== 'note') {
                   await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { 
                       messaging_product: "whatsapp", 
@@ -255,16 +265,14 @@ io.on('connection', (socket) => {
                   console.log("📝 Nota interna guardada (No enviada a WhatsApp):", msg.text);
               }
 
-              // Guardamos en DB y emitimos al Frontend SIEMPRE (para que los agentes lo vean)
               await saveAndEmitMessage({ 
                   text: msg.text, 
                   sender: msg.sender, 
                   recipient: targetPhone, 
                   timestamp: new Date().toISOString(),
-                  type: msg.type || 'text' // Guardar el tipo correcto (note/text)
+                  type: msg.type || 'text' 
               }); 
               
-              // Actualizamos el "último mensaje" en el sidebar, indicando si es nota
               const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`;
               await handleContactUpdate(targetPhone, previewText); 
 
@@ -274,33 +282,25 @@ io.on('connection', (socket) => {
       } 
   });
 
-  // --- LÓGICA DE USUARIOS ONLINE ---
   socket.on('register_presence', (username: string) => {
-    // Cuando el cliente dice "Hola, soy X", lo guardamos
     if (username) {
       onlineUsers.set(socket.id, username);
       console.log(`🟢 Usuario online: ${username} (ID: ${socket.id})`);
-      
-      // Enviamos a TODOS la lista actualizada de nombres únicos
       const uniqueUsers = Array.from(new Set(onlineUsers.values()));
       io.emit('online_users_update', uniqueUsers);
     }
   });
 
   socket.on('disconnect', () => {
-    // Si el socket se desconecta, miramos quién era y lo borramos
     if (onlineUsers.has(socket.id)) {
       const leaver = onlineUsers.get(socket.id);
       onlineUsers.delete(socket.id);
       console.log(`🔴 Usuario offline: ${leaver} (ID: ${socket.id})`);
-
-      // Enviamos la lista actualizada
       const uniqueUsers = Array.from(new Set(onlineUsers.values()));
       io.emit('online_users_update', uniqueUsers);
     }
   });
 
-  // --- LÓGICA DE ESCRIBIENDO ---
   socket.on('typing', (data) => {
     console.log(`🔔 [SERVER] Recibido evento typing de usuario: ${data.user} para el chat: ${data.phone}`); 
     socket.broadcast.emit('remote_typing', data);
