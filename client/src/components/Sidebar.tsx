@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, Search, RefreshCw, UserCheck, Briefcase } from 'lucide-react';
+import { Search, RefreshCw, UserCheck, Briefcase, Filter, User, ChevronDown, X } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -13,6 +13,10 @@ export interface Contact {
   avatar?: string;
 }
 
+// Interfaces para los desplegables
+interface Agent { id: string; name: string; }
+interface ConfigItem { id: string; name: string; type: string; }
+
 interface SidebarProps {
   user: { username: string, role: string };
   socket: any;
@@ -23,27 +27,36 @@ interface SidebarProps {
   typingStatus: { [chatId: string]: string };
 }
 
-type FilterType = 'all' | 'mine' | 'dept' | 'unassigned';
+// Tipos de filtro ampliados
+type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
 
-// Helper para limpiar teléfonos y asegurar coincidencias
+// Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
     if (!phone) return "";
-    return phone.replace(/\D/g, ""); // Elimina todo lo que no sea número (+, espacios, -)
+    return phone.replace(/\D/g, "");
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {} }: SidebarProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Estado local para contar mensajes no leídos
-  const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
+  // ESTADOS DE FILTRO
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [filterValue, setFilterValue] = useState<string>(''); // Guarda el nombre del agente o dpto seleccionado
   
+  // DATOS PARA LISTAS DESPLEGABLES
+  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
+  const [availableDepts, setAvailableDepts] = useState<string[]>([]);
+
+  const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Carga inicial de datos
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
+        socket.emit('request_agents'); // Pedimos agentes para el filtro
+        socket.emit('request_config'); // Pedimos config para los deptos
     }
   }, [socket, isConnected]);
 
@@ -55,7 +68,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
               const cleanP = normalizePhone(contact.phone);
               setUnreadCounts(prev => {
                   const newCounts = { ...prev };
-                  delete newCounts[cleanP]; // Borramos la entrada limpia
+                  delete newCounts[cleanP];
                   return newCounts;
               });
           }
@@ -68,33 +81,34 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     if (!socket) return;
 
+    // --- HANDLERS ---
     const handleContactsUpdate = (newContacts: any) => {
       if (Array.isArray(newContacts)) setContacts(newContacts);
     };
 
+    const handleAgentsList = (list: Agent[]) => setAvailableAgents(list);
+    
+    const handleConfigList = (list: ConfigItem[]) => {
+        const depts = list.filter(i => i.type === 'Department').map(i => i.name);
+        setAvailableDepts(depts);
+    };
+
+    // --- LISTENERS ---
     socket.on('contacts_update', handleContactsUpdate);
+    socket.on('agents_list', handleAgentsList);     // Recibir agentes
+    socket.on('config_list', handleConfigList);     // Recibir deptos
     socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
 
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
-        
         if (!isMe) {
-            // Reproducir sonido
             audioRef.current?.play().catch(() => {});
-            
-            // Incrementar contador
             const senderClean = normalizePhone(msg.sender);
-            
-            // Comprobar si NO es el chat que tengo abierto ahora mismo
-            // Buscamos el contacto activo en la lista para comparar su teléfono limpio
             const currentContact = contacts.find(c => c.id === selectedContactId);
             const currentContactPhoneClean = currentContact ? normalizePhone(currentContact.phone) : null;
 
             if (senderClean !== currentContactPhoneClean) {
-                setUnreadCounts(prev => ({
-                    ...prev,
-                    [senderClean]: (prev[senderClean] || 0) + 1
-                }));
+                setUnreadCounts(prev => ({ ...prev, [senderClean]: (prev[senderClean] || 0) + 1 }));
             }
         }
         socket.emit('request_contacts');
@@ -108,12 +122,15 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     return () => {
       socket.off('contacts_update', handleContactsUpdate);
+      socket.off('agents_list', handleAgentsList);
+      socket.off('config_list', handleConfigList);
       socket.off('contact_updated_notification');
       socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
+  // --- HELPERS ---
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
@@ -128,22 +145,12 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  const filteredContacts = contacts.filter(c => {
-      const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
-      if (!matchesSearch) return false;
-      if (filter === 'all') return true;
-      if (filter === 'mine') return c.assigned_to === user.username || c.department === user.role;
-      if (filter === 'dept') return c.department === user.role;
-      if (filter === 'unassigned') return !c.assigned_to && !c.department;
-      return true;
-  });
-
   const checkOnline = (contact: Contact) => {
       if (!onlineUsers || onlineUsers.length === 0) return false;
       const cName = (contact.name || "").toLowerCase().trim();
-      
       return onlineUsers.some(u => {
           const userLogged = u.toLowerCase().trim();
+          // Solo comprobamos por nombre, ya que es "Equipo Online"
           if (cName) {
               if (userLogged === cName) return true;
               if (cName.length > 2 && (userLogged.includes(cName) || cName.includes(userLogged))) return true;
@@ -152,35 +159,109 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       });
   };
 
+  // --- LÓGICA DE FILTRADO MAESTRA ---
+  const filteredContacts = contacts.filter(c => {
+      // 1. Filtro de búsqueda (Texto)
+      const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
+      if (!matchesSearch) return false;
+
+      // 2. Filtro de Categoría
+      if (filter === 'all') return true;
+      if (filter === 'mine') return c.assigned_to === user.username;
+      if (filter === 'unassigned') return !c.assigned_to;
+      
+      // 3. Filtros avanzados
+      if (filter === 'agent') return c.assigned_to === filterValue;
+      if (filter === 'department') return c.department === filterValue;
+
+      return true;
+  });
+
+  // Manejador para botones de filtro
+  const handleFilterClick = (type: FilterType) => {
+      if (filter === type && (type === 'all' || type === 'mine' || type === 'unassigned')) return; // No hacer nada si ya está activo
+      setFilter(type);
+      // Resetear valor si cambiamos a un modo que no usa selector secundario
+      if (type === 'all' || type === 'mine' || type === 'unassigned') setFilterValue('');
+      // Si entramos en agente o dpto, ponemos el primero por defecto si hay lista
+      if (type === 'agent' && availableAgents.length > 0) setFilterValue(availableAgents[0].name);
+      if (type === 'department' && availableDepts.length > 0) setFilterValue(availableDepts[0]);
+  };
+
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
+      
+      {/* CABECERA DEL SIDEBAR */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
             {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
         </h2>
-        <div className="relative"><Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" /><input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" /></div>
-        <div className="flex gap-1 mt-3 p-1 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar">
-            <button onClick={() => setFilter('all')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
-            <button onClick={() => setFilter('mine')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap flex items-center justify-center gap-1 ${filter === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><UserCheck className="w-3 h-3" /> Míos</button>
-            <button onClick={() => setFilter('unassigned')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'unassigned' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Sin Asignar</button>
+        
+        <div className="relative mb-3">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
+
+        {/* BOTONES DE FILTRO */}
+        <div className="flex gap-2 pb-1 overflow-x-auto no-scrollbar">
+            <button onClick={() => handleFilterClick('all')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Todos</button>
+            <button onClick={() => handleFilterClick('mine')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center gap-1 ${filter === 'mine' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}><UserCheck className="w-3 h-3" /> Míos</button>
+            <button onClick={() => handleFilterClick('unassigned')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all ${filter === 'unassigned' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Libres</button>
+            
+            {/* Botones de filtro avanzado */}
+            <button onClick={() => handleFilterClick('agent')} className={`flex-shrink-0 px-2 py-1.5 rounded-lg transition-all ${filter === 'agent' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} title="Por Agente">
+                <User className="w-4 h-4" />
+            </button>
+            <button onClick={() => handleFilterClick('department')} className={`flex-shrink-0 px-2 py-1.5 rounded-lg transition-all ${filter === 'department' ? 'bg-pink-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} title="Por Departamento">
+                <Briefcase className="w-4 h-4" />
+            </button>
+        </div>
+
+        {/* SELECTOR SECUNDARIO (Solo aparece si eliges Agente o Dpto) */}
+        {(filter === 'agent' || filter === 'department') && (
+            <div className="mt-3 animate-in slide-in-from-top-2 fade-in duration-200">
+                <div className="relative">
+                    <select 
+                        value={filterValue} 
+                        onChange={(e) => setFilterValue(e.target.value)} 
+                        className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border-none focus:ring-0 cursor-pointer ${filter === 'agent' ? 'bg-purple-50 text-purple-700' : 'bg-pink-50 text-pink-700'}`}
+                    >
+                        {filter === 'agent' ? (
+                            availableAgents.length > 0 ? availableAgents.map(a => <option key={a.id} value={a.name}>{a.name}</option>) : <option>Sin Agentes</option>
+                        ) : (
+                            availableDepts.length > 0 ? availableDepts.map(d => <option key={d} value={d}>{d}</option>) : <option>Sin Dptos</option>
+                        )}
+                    </select>
+                    <ChevronDown className={`absolute right-2 top-2.5 w-4 h-4 ${filter === 'agent' ? 'text-purple-400' : 'text-pink-400'}`} />
+                    
+                    {/* Botón para cerrar filtro avanzado */}
+                    <button 
+                        onClick={() => setFilter('all')} 
+                        className="absolute -right-2 -top-8 bg-slate-200 rounded-full p-1 text-slate-500 hover:bg-slate-300 md:hidden"
+                    >
+                        <X className="w-3 h-3"/>
+                    </button>
+                </div>
+            </div>
+        )}
       </div>
       
+      {/* LISTA DE CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
-                    <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />
+                    {filter === 'agent' || filter === 'department' ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
                 </div>
-                <p>{isConnected ? "Cargando chats..." : "Esperando conexión..."}</p>
+                <p>{isConnected ? (filter === 'all' ? "Cargando chats..." : "No hay chats con este filtro") : "Esperando conexión..."}</p>
             </div>
         ) : (
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
               const isTyping = typingStatus[contact.phone];
-              // Usamos el teléfono normalizado para buscar en el mapa de contadores
               const unread = unreadCounts[normalizePhone(contact.phone)] || 0;
+              // Aquí no usamos isOnline para contactos (clientes), solo para agentes abajo
 
               return (
                 <li key={contact.id || Math.random()}>
@@ -203,7 +284,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                               {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
                           </p>
                           
-                          {/* BADGE DE NO LEÍDOS - FORZADO VISUALMENTE */}
                           {unread > 0 && (
                               <span className="flex-shrink-0 bg-red-500 text-white text-[10px] font-bold h-5 min-w-[20px] px-1 rounded-full flex items-center justify-center shadow-sm animate-in zoom-in">
                                   {unread > 99 ? '99+' : unread}
@@ -225,6 +305,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
+      {/* FOOTER: EQUIPO ONLINE */}
       {onlineUsers.length > 0 && (
         <div className="bg-slate-50 border-t border-slate-200 p-3">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
