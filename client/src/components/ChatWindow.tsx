@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, UserCheck } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -19,6 +19,12 @@ interface Message {
   timestamp: string;
   type?: string;
   mediaId?: string;
+}
+
+interface Agent {
+    id: string;
+    name: string;
+    role: string;
 }
 
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
@@ -46,7 +52,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
+  const [assignedTo, setAssignedTo] = useState(contact.assigned_to || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  
+  // Estado para lista de agentes
+  const [agents, setAgents] = useState<Agent[]>([]);
   
   // Estado para el menú de asignación
   const [showAssignMenu, setShowAssignMenu] = useState(false);
@@ -75,12 +85,25 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   useEffect(() => scrollToBottom(), [messages]);
 
   useEffect(() => {
-    setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
+    setName(contact.name || ''); 
+    setDepartment(contact.department || ''); 
+    setStatus(contact.status || '');
+    setAssignedTo(contact.assigned_to || '');
     setMessages([]); setShowEmojiPicker(false); setIsRecording(false);
     setShowAssignMenu(false); // Reset menú
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
+
+  // Cargar lista de agentes al montar
+  useEffect(() => {
+      if (socket) {
+          socket.emit('request_agents');
+          const handleAgentsList = (list: Agent[]) => setAgents(list);
+          socket.on('agents_list', handleAgentsList);
+          return () => { socket.off('agents_list', handleAgentsList); };
+      }
+  }, [socket]);
 
   useEffect(() => {
     const handleHistory = (history: Message[]) => setMessages(history);
@@ -118,27 +141,39 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     }
   };
 
-  const updateCRM = (field: string, value: string) => { if (socket) { const updates: any = {}; updates[field] = value; socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); }};
+  const updateCRM = (field: string, value: string) => { 
+      if (socket) { 
+          const updates: any = {}; 
+          updates[field] = value; 
+          
+          // Si asignamos a alguien y el estado es Nuevo, lo pasamos a Abierto automáticamente
+          if (field === 'assigned_to' && value && status === 'Nuevo') {
+              updates.status = 'Abierto';
+              setStatus('Abierto');
+          }
+          
+          socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); 
+      }
+  };
   
-  // FUNCIÓN PARA ASIGNAR Y ABRIR CHAT
+  // FUNCIÓN PARA ASIGNAR Y ABRIR CHAT (Botón "Nuevo")
   const handleAssign = (target: 'me' | string) => {
       if (!socket) return;
       
-      const updates: any = { status: 'Abierto' }; // Cambiamos estado automáticamente
+      const updates: any = { status: 'Abierto' }; 
       
       if (target === 'me') {
           updates.assigned_to = user.username;
+          setAssignedTo(user.username);
       } else {
           updates.department = target;
-          updates.assigned_to = null; // Limpiamos asignado si va a pool de depto
+          updates.assigned_to = null; 
+          setAssignedTo('');
+          setDepartment(target);
       }
 
       socket.emit('update_contact_info', { phone: contact.phone, updates });
-      
-      // Actualización optimista de UI
       setStatus('Abierto');
-      if (target !== 'me') setDepartment(target);
-      
       setShowAssignMenu(false);
   };
 
@@ -257,8 +292,25 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                 )}
             </div>
         ) : (
-            // Si NO es nuevo, mostramos los selectores normales
+            // Si NO es nuevo, mostramos los selectores de siempre + el NUEVO selector de agente
             <>
+                <div className="flex items-center gap-2 bg-blue-50 px-2 rounded-md border border-blue-200">
+                    <UserCheck className="w-4 h-4 text-blue-600" />
+                    <select 
+                        className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-blue-700 focus:ring-0 cursor-pointer font-bold tracking-wide max-w-[100px]" 
+                        value={assignedTo} 
+                        onChange={(e) => { 
+                            setAssignedTo(e.target.value); 
+                            updateCRM('assigned_to', e.target.value); 
+                        }}
+                    >
+                        <option value="">Sin Asignar</option>
+                        {agents.map(a => (
+                            <option key={a.id} value={a.name}>{a.name}</option>
+                        ))}
+                    </select>
+                </div>
+
                 <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
             </>
