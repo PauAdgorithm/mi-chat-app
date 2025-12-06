@@ -51,7 +51,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   
   // USAMOS LAS PROPS QUE VIENEN DE APP
   const typingUser = typingInfo[contact.phone] || null;
-  const isOnline = onlineUsers.includes(contact.phone);
+  // MODIFICADO: Comprobamos si está online por teléfono O por nombre (útil para pruebas locales)
+  const isOnline = onlineUsers.includes(contact.phone) || (contact.name && onlineUsers.includes(contact.name));
 
   const lastTypingTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
