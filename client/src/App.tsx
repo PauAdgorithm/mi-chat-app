@@ -9,14 +9,12 @@ import { MessageCircle, LogOut, Settings as SettingsIcon, WifiOff } from 'lucide
 const isProduction = window.location.hostname.includes('render.com');
 const BACKEND_URL = isProduction ? "https://chatgorithm.onrender.com" : "http://localhost:3000";
 
-// Configuración de socket más agresiva para reconectar
 const socket = io(BACKEND_URL, { 
     transports: ['websocket', 'polling'], 
     reconnectionAttempts: 10,
     reconnectionDelay: 1000
 });
 
-// Helper fuera del componente para leer storage de forma síncrona
 const getSavedUser = () => {
     try {
         const saved = localStorage.getItem('chatgorithm_user') || sessionStorage.getItem('chatgorithm_user');
@@ -28,38 +26,33 @@ const getSavedUser = () => {
 };
 
 function App() {
-  // 1. Inicialización Lazy: Lee el storage ANTES del primer render
   const [user, setUser] = useState<{username: string, role: string} | null>(getSavedUser);
-  
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [view, setView] = useState<'chat' | 'settings'>('chat');
-  
-  // 2. Corrección Conexión: Asumimos 'true' al inicio para evitar flash rojo
   const [isConnected, setIsConnected] = useState(true);
   
+  // --- ESTADOS GLOBALES NUEVOS ---
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); // Mapa phone -> username
+
   const [config, setConfig] = useState<{departments: string[], statuses: string[]}>({ 
       departments: [], 
       statuses: [] 
   });
 
   useEffect(() => {
-    // Solicitar permiso de notificación al montar
     if ('Notification' in window && Notification.permission !== 'granted') {
         Notification.requestPermission();
     }
 
-    // Si arrancamos con usuario, enviamos señal de login al socket
     if (user) {
-        // Nota: Tu backend usa 'login' o 'login_attempt', asegúrate de que coincida
-        // Como tienes 'login_attempt' para auth con DB, puede que necesites ajustar esto si quieres persistencia de socket
-        // Pero para el chat en tiempo real básico esto suele bastar para registrar el ID
-        // En tu backend actual NO veo socket.on('login'), así que esto es informativo o para futuro
+        socket.emit('register_presence', user.username);
     }
 
-    // Eventos de conexión
     const onConnect = () => {
         setIsConnected(true);
         console.log("🟢 Conectado/Reconectado");
+        if (user) socket.emit('register_presence', user.username);
         socket.emit('request_config');
     };
 
@@ -68,15 +61,40 @@ function App() {
         console.log("🔴 Desconectado");
     };
 
+    // --- LISTENERS GLOBALES ---
+    const onOnlineUsersUpdate = (users: string[]) => {
+        setOnlineUsers(users);
+    };
+
+    const onRemoteTyping = (data: { user: string, phone: string }) => {
+        // Ignorar si soy yo
+        if (data.user !== user?.username) {
+            setTypingStatus(prev => ({ ...prev, [data.phone]: data.user }));
+            
+            // Limpiar automáticamente a los 3 segundos
+            setTimeout(() => {
+                setTypingStatus(prev => {
+                    if (prev[data.phone] === data.user) {
+                        const newState = { ...prev };
+                        delete newState[data.phone];
+                        return newState;
+                    }
+                    return prev;
+                });
+            }, 3000);
+        }
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
+    // Escuchar eventos globales aquí para pasarlos a los hijos
+    socket.on('online_users_update', onOnlineUsersUpdate);
+    socket.on('remote_typing', onRemoteTyping);
 
-    // FIX DEL AVISO ROJO: Sincronizar estado real tras un breve delay
     const connectionCheckTimeout = setTimeout(() => {
         setIsConnected(socket.connected);
     }, 1500);
 
-    // Cargar configuración
     socket.on('config_list', (list: any[]) => {
         const depts = list.filter(i => i.type === 'Department').map(i => i.name);
         const stats = list.filter(i => i.type === 'Status').map(i => i.name);
@@ -92,12 +110,14 @@ function App() {
         socket.off('connect', onConnect);
         socket.off('disconnect', onDisconnect);
         socket.off('config_list');
+        socket.off('online_users_update');
+        socket.off('remote_typing');
         clearTimeout(connectionCheckTimeout);
     };
-  }, []); 
+  }, [user]); 
 
   const handleLogin = (username: string, role: string, password: string, remember: boolean) => {
-    const u = { username, role }; // NO guardamos password
+    const u = { username, role };
     setUser(u);
     
     const dataToSave = JSON.stringify(u);
@@ -110,8 +130,7 @@ function App() {
         localStorage.removeItem('chatgorithm_user');
     }
     
-    // Si tu backend necesita login para el socket, emítelo aquí
-    // socket.emit('login', { username }); 
+    socket.emit('register_presence', username);
   };
 
   const handleLogout = () => {
@@ -123,7 +142,6 @@ function App() {
       socket.connect(); 
   };
 
-  // --- PANTALLA LOGIN ---
   if (!user) {
       return (
         <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -134,12 +152,10 @@ function App() {
       );
   }
 
-  // --- SETTINGS ---
   if (view === 'settings') {
       return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} />;
   }
 
-  // --- CHAT ---
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
@@ -152,6 +168,9 @@ function App() {
                 onSelectContact={setSelectedContact} 
                 selectedContactId={selectedContact?.id} 
                 isConnected={isConnected}
+                // PASAMOS LA INFO DE ONLINE/TYPING
+                onlineUsers={onlineUsers}
+                typingStatus={typingStatus}
             />
             
             <div className="p-3 border-t border-slate-200 bg-white flex gap-2">
@@ -181,6 +200,9 @@ function App() {
                     contact={selectedContact} 
                     config={config}
                     onBack={() => setSelectedContact(null)}
+                    // PASAMOS LA INFO DE ONLINE/TYPING
+                    onlineUsers={onlineUsers}
+                    typingInfo={typingStatus}
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
