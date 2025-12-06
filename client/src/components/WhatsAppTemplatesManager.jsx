@@ -10,18 +10,23 @@ import {
   Info,
   Send,
   Braces,
-  Database
+  Database,
+  BookOpen, // Nuevo icono para la guía
+  AlertTriangle,
+  Lightbulb
 } from 'lucide-react';
 
 const WhatsAppTemplatesManager = () => {
   const isProduction = window.location.hostname.includes('render.com');
+  // Asegúrate de que esta URL sea la correcta de tu backend
   const API_URL_BASE = isProduction
-    ? 'https://chatgorithm.onrender.com/api' // Tu backend real
+    ? 'https://chatgorithm.onrender.com/api' 
     : 'http://localhost:3000/api';
 
   const [templates, setTemplates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false); // Estado para el modal de ayuda
   
   const [formData, setFormData] = useState({
     name: '',
@@ -64,7 +69,6 @@ const WhatsAppTemplatesManager = () => {
     setFormData({ ...formData, body: formData.body + newVar });
   };
 
-  // --- NUEVA FUNCIÓN DE ELIMINAR ---
   const handleDelete = async (id, name) => {
     if (!window.confirm(`¿Estás seguro de que quieres eliminar la plantilla "${name}"?`)) return;
 
@@ -74,7 +78,6 @@ const WhatsAppTemplatesManager = () => {
         });
 
         if (response.ok) {
-            // Actualizar la lista localmente
             setTemplates(prev => prev.filter(t => t.id !== id));
             alert("Plantilla eliminada correctamente.");
         } else {
@@ -151,14 +154,26 @@ const WhatsAppTemplatesManager = () => {
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><MessageSquarePlus className="text-green-600" /> Plantillas de WhatsApp</h1>
           <p className="text-slate-500 text-sm mt-1">Define los mensajes automáticos para iniciar conversaciones.</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-slate-200 active:scale-95"><Plus size={18} /> Nueva Plantilla</button>
+        <div className="flex gap-3">
+          {/* BOTÓN DE AYUDA NUEVO */}
+          <button 
+            onClick={() => setIsHelpOpen(true)}
+            className="flex items-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm active:scale-95"
+          >
+            <BookOpen size={18} className="text-blue-500" /> Guía de Uso
+          </button>
+          <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-slate-200 active:scale-95"><Plus size={18} /> Nueva Plantilla</button>
+        </div>
       </div>
 
+      {/* Lista */}
       <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
         {isLoading ? (
           <div className="p-12 text-center text-slate-400"><RefreshCw className="animate-spin mx-auto mb-2" /> Cargando plantillas...</div>
@@ -184,7 +199,6 @@ const WhatsAppTemplatesManager = () => {
                     <td className="p-4 text-slate-600 text-sm uppercase">{template.language}</td>
                     <td className="p-4"><div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${getStatusColor(template.status)}`}>{getStatusIcon(template.status)} {template.status === 'APPROVED' ? 'Aprobada' : template.status === 'PENDING' ? 'Revisión' : 'Rechazada'}</div></td>
                     <td className="p-4 text-right">
-                      {/* BOTÓN ELIMINAR CONECTADO */}
                       <button 
                         onClick={() => handleDelete(template.id, template.name)}
                         className="text-slate-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-lg"
@@ -201,6 +215,7 @@ const WhatsAppTemplatesManager = () => {
         )}
       </div>
 
+      {/* Modal Nueva Plantilla */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex overflow-hidden animate-in zoom-in-95 duration-200">
@@ -240,6 +255,109 @@ const WhatsAppTemplatesManager = () => {
           </div>
         </div>
       )}
+
+      {/* --- MODAL DE AYUDA (NUEVO) --- */}
+      {isHelpOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <BookOpen className="text-blue-600" /> Guía Maestra de Plantillas
+              </h2>
+              <button onClick={() => setIsHelpOpen(false)} className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-2 rounded-full transition-all">
+                <XCircle size={24} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 text-slate-700 space-y-8">
+              {/* Introducción */}
+              <div className="bg-blue-50 p-5 rounded-xl border border-blue-100">
+                <h3 className="font-bold text-blue-800 text-lg mb-2">👋 ¿Por qué usar plantillas?</h3>
+                <p className="text-sm text-blue-700 leading-relaxed">
+                  En WhatsApp Business, cuando un cliente te escribe, tienes <strong>24 horas</strong> para responderle libremente. Pasado ese tiempo, la "ventana" se cierra. 
+                  Las <strong>Plantillas</strong> son la única forma ("llave maestra") de volver a abrir esa conversación.
+                </p>
+              </div>
+
+              {/* Categorías */}
+              <div className="space-y-4">
+                <h3 className="font-bold text-slate-900 text-lg border-b border-slate-100 pb-2">🚦 Las 3 Categorías (Elige bien)</h3>
+                
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-green-500"/> UTILIDAD</div>
+                    <p className="text-xs text-slate-500 mb-2">Transaccional / Informativo</p>
+                    <p className="text-sm">Para informar de algo acordado: Citas, Pedidos listos, Facturas. <strong>No vendas nada aquí.</strong></p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> MARKETING</div>
+                    <p className="text-xs text-slate-500 mb-2">Promocional / Inicio</p>
+                    <p className="text-sm">Ofertas, Felicitaciones o <strong>abrir conversación sin motivo específico</strong> (ej: "Buenos días").</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="font-bold text-slate-800 mb-1 flex items-center gap-2"><CheckCircle size={16} className="text-purple-500"/> AUTENTICACIÓN</div>
+                    <p className="text-xs text-slate-500 mb-2">Códigos OTP</p>
+                    <p className="text-sm">Solo para enviar códigos de seguridad de un solo uso.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ejemplos */}
+              <div className="space-y-4">
+                <h3 className="font-bold text-slate-900 text-lg border-b border-slate-100 pb-2">📝 Ejemplos Prácticos</h3>
+                
+                <div className="bg-green-50/50 p-4 rounded-xl border border-green-100">
+                  <div className="font-bold text-green-800 text-sm mb-2">✅ Caso A: Coche/Pedido listo (UTILIDAD)</div>
+                  <p className="text-sm italic bg-white p-3 rounded-lg border border-green-200 text-slate-600">
+                    "Hola <span className="font-bold text-blue-600">{'{{1}}'}</span>, buenas noticias. Tu vehículo con matrícula <span className="font-bold text-blue-600">{'{{2}}'}</span> ya está reparado. El importe es <span className="font-bold text-blue-600">{'{{3}}'}</span>. ¡Te esperamos!"
+                  </p>
+                </div>
+
+                <div className="bg-yellow-50/50 p-4 rounded-xl border border-yellow-100">
+                  <div className="font-bold text-yellow-800 text-sm mb-2">⚠️ Caso B: El saludo trampa</div>
+                  <p className="text-sm mb-2">Si envías solo "Buenos días", Meta lo marcará como Marketing (más caro) o lo rechazará.</p>
+                  <p className="text-sm font-bold text-slate-700">Truco Pro:</p>
+                  <p className="text-sm italic bg-white p-3 rounded-lg border border-yellow-200 text-slate-600 mt-1">
+                    "Buenos días <span className="font-bold text-blue-600">{'{{1}}'}</span>, te contactamos porque hay novedades sobre el recambio <span className="font-bold text-blue-600">{'{{2}}'}</span>. ¿Tienes un momento?"
+                  </p>
+                </div>
+              </div>
+
+              {/* Errores */}
+              <div className="bg-red-50 p-5 rounded-xl border border-red-100 flex gap-4">
+                <AlertTriangle className="text-red-500 shrink-0" />
+                <div>
+                  <h3 className="font-bold text-red-800 mb-1">🚫 Los 3 Pecados Capitales</h3>
+                  <ul className="text-sm text-red-700 space-y-1 list-disc pl-4">
+                    <li><strong>Plantillas Mudas:</strong> No envíes solo variables (ej: "<code>{'{{1}} - {{2}}'}</code>"). Explica el motivo.</li>
+                    <li><strong>Publicidad encubierta:</strong> No uses Utilidad para meter ofertas en las variables.</li>
+                    <li><strong>Mala ortografía:</strong> Meta rechaza textos con muchos errores o formatos raros.</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Consejo Final */}
+              <div className="flex items-center gap-3 bg-slate-100 p-4 rounded-xl">
+                <Lightbulb className="text-yellow-500 shrink-0" />
+                <p className="text-sm text-slate-600">
+                  <strong>Recuerda:</strong> La plantilla solo abre la puerta. ¡Una vez el cliente contesta, la ventana de 24h se abre y ya puedes escribir libremente!
+                </p>
+              </div>
+
+            </div>
+            
+            <div className="p-6 border-t border-slate-100 bg-white flex justify-end">
+              <button 
+                onClick={() => setIsHelpOpen(false)}
+                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95"
+              >
+                Entendido, ¡Gracias!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
