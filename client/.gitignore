@@ -36,3 +36,4 @@ dist_desktop
 win-unpacked
 release
 build
+.env
