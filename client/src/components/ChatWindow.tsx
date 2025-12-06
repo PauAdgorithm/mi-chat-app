@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -48,13 +48,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [status, setStatus] = useState(contact.status || '');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
+  // Estado para el menú de asignación
+  const [showAssignMenu, setShowAssignMenu] = useState(false);
+
   const typingUser = typingInfo[contact.phone] || null;
   const isOnline = onlineUsers.some(u => {
       if (!u) return false;
       const userLower = u.toLowerCase().trim();
       const contactName = (contact.name || '').toLowerCase().trim();
+      const contactPhone = (contact.phone || '').replace(/\D/g, ''); 
       if (contactName && userLower === contactName) return true;
-      if (contactName.length > 2 && (userLower.includes(contactName) || contactName.includes(userLower))) return true;
+      if (contactPhone && userLower === contactPhone) return true;
       return false;
   });
 
@@ -73,6 +77,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   useEffect(() => {
     setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || '');
     setMessages([]); setShowEmojiPicker(false); setIsRecording(false);
+    setShowAssignMenu(false); // Reset menú
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
@@ -114,6 +119,29 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   };
 
   const updateCRM = (field: string, value: string) => { if (socket) { const updates: any = {}; updates[field] = value; socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); }};
+  
+  // FUNCIÓN PARA ASIGNAR Y ABRIR CHAT
+  const handleAssign = (target: 'me' | string) => {
+      if (!socket) return;
+      
+      const updates: any = { status: 'Abierto' }; // Cambiamos estado automáticamente
+      
+      if (target === 'me') {
+          updates.assigned_to = user.username;
+      } else {
+          updates.department = target;
+          updates.assigned_to = null; // Limpiamos asignado si va a pool de depto
+      }
+
+      socket.emit('update_contact_info', { phone: contact.phone, updates });
+      
+      // Actualización optimista de UI
+      setStatus('Abierto');
+      if (target !== 'me') setDepartment(target);
+      
+      setShowAssignMenu(false);
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
   const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; } };
   const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
@@ -124,7 +152,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // --- FUNCIÓN DE FECHAS ---
   const getDateLabel = (dateString: string) => {
       const date = new Date(dateString);
-      if (isNaN(date.getTime())) return ""; // Fecha inválida
+      if (isNaN(date.getTime())) return ""; 
       const today = new Date();
       const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
 
@@ -133,15 +161,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  // Pre-calcular los elementos a renderizar para evitar lógica compleja en el JSX
-  const renderedItems = [];
+  const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
 
   for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
       const dateLabel = getDateLabel(m.timestamp);
       
-      // Si la fecha cambia, insertar separador
       if (dateLabel && dateLabel !== lastDateLabel) {
           renderedItems.push(
               <div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6 sticky top-2 z-10 opacity-90">
@@ -171,7 +197,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => setShowEmojiPicker(false)}>
+    <div className="flex flex-col h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
@@ -203,14 +229,45 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             </div>
         </div>
         
-        <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
-        <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
+        {/* BOTÓN ASIGNAR INTELIGENTE (Solo si es NUEVO) */}
+        {status === 'Nuevo' ? (
+            <div className="relative">
+                <button 
+                    onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }}
+                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"
+                >
+                    <UserPlus className="w-3.5 h-3.5" /> Asignar
+                </button>
+
+                {showAssignMenu && (
+                    <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-1">
+                            <button onClick={() => handleAssign('me')} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 rounded-lg flex items-center gap-2 font-medium transition-colors">
+                                <User className="w-4 h-4 text-blue-500" /> A mí ({user.username})
+                            </button>
+                            <div className="h-px bg-slate-100 my-1"></div>
+                            <p className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Departamentos</p>
+                            {config?.departments?.map(dept => (
+                                <button key={dept} onClick={() => handleAssign(dept)} className="w-full text-left px-3 py-2 text-sm text-slate-600 hover:bg-purple-50 rounded-lg hover:text-purple-700 flex items-center gap-2 transition-colors">
+                                    <Briefcase className="w-3.5 h-3.5 opacity-50" /> {dept}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        ) : (
+            // Si NO es nuevo, mostramos los selectores normales
+            <>
+                <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
+                <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
+            </>
+        )}
       </div>
 
-      <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => setShowEmojiPicker(false)}>
+      <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
         {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
         
-        {/* Aquí insertamos la lista ya procesada */}
         {renderedItems}
         
         <div ref={messagesEndRef} />
