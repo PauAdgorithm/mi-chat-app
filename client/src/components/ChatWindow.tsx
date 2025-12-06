@@ -206,7 +206,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       
       if (dateLabel && dateLabel !== lastDateLabel) {
           renderedItems.push(
-              <div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6 sticky top-2 z-10 opacity-90">
+              // SEPARADOR DE FECHAS ESTÁTICO (NO STICKY)
+              <div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6">
                   <span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-sm border border-slate-300/50">
                       {dateLabel}
                   </span>
