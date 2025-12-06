@@ -100,7 +100,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowAssignMenu(false); 
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
-    setCrmNotes(""); // Aquí cargarías las notas reales si vinieran de BD
+    setCrmNotes(""); 
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact, socket]);
@@ -153,8 +153,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           type: isInternalMode ? 'note' : 'text'  // Tipo dinámico
       };
       
-      // Enviamos el mensaje (el backend debe manejar 'type: note' para no enviarlo a WA)
-      // Nota: Si tu backend actual reenvía todo a WhatsApp, necesitarías filtrar allí por type != 'note'
       socket.emit('chatMessage', msg); 
       
       setInput(''); 
@@ -226,7 +224,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       }
 
       const isMe = m.sender !== contact.phone;
-      const isNote = m.type === 'note'; // Detectar si es nota interna
+      const isNote = m.type === 'note'; 
 
       renderedItems.push(
         <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
@@ -262,17 +260,20 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
             
+            {/* NOMBRE DEL CLIENTE */}
             <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                     <User className="w-4 h-4 text-slate-400" />
                     <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
                 </div>
+                
                 <div className={`overflow-hidden transition-all duration-300 ${(typingUser || isOnline) ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> 
                     : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
             
+            {/* ESTADOS / ASIGNACION */}
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -287,7 +288,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             )}
 
             <div className="flex-1"></div>
-            {/* BOTÓN INFO (Toggle Panel Detalles) */}
+            {/* BOTÓN INFO */}
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
