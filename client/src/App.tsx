@@ -5,6 +5,8 @@ import { ChatWindow } from './components/ChatWindow';
 import { Sidebar, Contact } from './components/Sidebar';
 import { Settings } from './components/Settings';
 import { MessageCircle, LogOut, Settings as SettingsIcon, WifiOff } from 'lucide-react';
+// IMPORTANTE: Importamos el selector de plantillas
+import ChatTemplateSelector from './components/ChatTemplateSelector';
 
 const isProduction = window.location.hostname.includes('render.com');
 const BACKEND_URL = isProduction ? "https://chatgorithm.onrender.com" : "http://localhost:3000";
@@ -31,9 +33,12 @@ function App() {
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [isConnected, setIsConnected] = useState(true);
   
+  // --- ESTADO PARA EL MODAL DE PLANTILLAS ---
+  const [showTemplates, setShowTemplates] = useState(false);
+
   // --- ESTADOS GLOBALES NUEVOS ---
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
-  const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); // Mapa phone -> username
+  const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); 
 
   const [config, setConfig] = useState<{departments: string[], statuses: string[]}>({ 
       departments: [], 
@@ -67,11 +72,8 @@ function App() {
     };
 
     const onRemoteTyping = (data: { user: string, phone: string }) => {
-        // Ignorar si soy yo
         if (data.user !== user?.username) {
             setTypingStatus(prev => ({ ...prev, [data.phone]: data.user }));
-            
-            // Limpiar automáticamente a los 3 segundos
             setTimeout(() => {
                 setTypingStatus(prev => {
                     if (prev[data.phone] === data.user) {
@@ -87,7 +89,6 @@ function App() {
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-    // Escuchar eventos globales aquí para pasarlos a los hijos
     socket.on('online_users_update', onOnlineUsersUpdate);
     socket.on('remote_typing', onRemoteTyping);
 
@@ -119,9 +120,7 @@ function App() {
   const handleLogin = (username: string, role: string, password: string, remember: boolean) => {
     const u = { username, role };
     setUser(u);
-    
     const dataToSave = JSON.stringify(u);
-
     if (remember) {
         localStorage.setItem('chatgorithm_user', dataToSave);
         sessionStorage.removeItem('chatgorithm_user');
@@ -129,7 +128,6 @@ function App() {
         sessionStorage.setItem('chatgorithm_user', dataToSave);
         localStorage.removeItem('chatgorithm_user');
     }
-    
     socket.emit('register_presence', username);
   };
 
@@ -168,7 +166,6 @@ function App() {
                 onSelectContact={setSelectedContact} 
                 selectedContactId={selectedContact?.id} 
                 isConnected={isConnected}
-                // PASAMOS LA INFO DE ONLINE/TYPING
                 onlineUsers={onlineUsers}
                 typingStatus={typingStatus}
             />
@@ -194,15 +191,17 @@ function App() {
               )}
               
               {selectedContact ? (
+                // @ts-ignore
                 <ChatWindow 
                     socket={socket} 
                     user={user} 
                     contact={selectedContact} 
                     config={config}
                     onBack={() => setSelectedContact(null)}
-                    // PASAMOS LA INFO DE ONLINE/TYPING
                     onlineUsers={onlineUsers}
                     typingInfo={typingStatus}
+                    // PASAMOS LA FUNCIÓN PARA ABRIR EL MODAL DE PLANTILLAS
+                    onOpenTemplates={() => setShowTemplates(true)}
                 /> 
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300">
@@ -213,6 +212,13 @@ function App() {
             </div>
           </main>
         </div>
+
+        {/* --- MODAL SELECTOR DE PLANTILLAS --- */}
+        <ChatTemplateSelector 
+            isOpen={showTemplates} 
+            onClose={() => setShowTemplates(false)} 
+            targetPhone={selectedContact?.phone || ""}
+        />
     </div>
   );
 }
