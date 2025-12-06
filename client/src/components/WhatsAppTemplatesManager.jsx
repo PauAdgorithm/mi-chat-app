@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   MessageSquarePlus, 
   CheckCircle2, 
@@ -8,7 +8,6 @@ import {
   Plus, 
   Trash2, 
   Info,
-  Smartphone,
   Send
 } from 'lucide-react';
 
@@ -25,7 +24,8 @@ const WhatsAppTemplatesManager = () => {
       language: 'es',
       status: 'APPROVED',
       body: 'Hola {{1}}, hemos recibido tu pedido #{{2}}. Te avisaremos cuando salga del almacén.',
-      lastUpdated: '2023-10-25'
+      lastUpdated: '2023-10-25',
+      reason: '' // Añadido para evitar errores de acceso
     },
     {
       id: 2,
@@ -87,7 +87,8 @@ const WhatsAppTemplatesManager = () => {
           language: formData.language,
           status: 'PENDING', // Siempre nace pendiente de revisión
           body: formData.body,
-          lastUpdated: new Date().toLocaleDateString()
+          lastUpdated: new Date().toLocaleDateString(),
+          reason: ''
         };
 
         setTemplates([newTemplate, ...templates]);
@@ -103,12 +104,26 @@ const WhatsAppTemplatesManager = () => {
       }
     } catch (error) {
       console.error("Error de conexión:", error);
-      alert("Error de conexión con el servidor. Asegúrate de que el backend esté corriendo.");
+      // Fallback para demo si falla la conexión
+      alert("Error de conexión (Backend no detectado). Creando en modo local para demo.");
+       const newTemplate = {
+          id: Date.now(),
+          name: formData.name,
+          category: formData.category,
+          language: formData.language,
+          status: 'PENDING',
+          body: formData.body,
+          lastUpdated: new Date().toLocaleDateString(),
+          reason: ''
+        };
+        setTemplates([newTemplate, ...templates]);
+        setIsModalOpen(false);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Funciones auxiliares sin tipos explícitos para compatibilidad con JS
   const getStatusColor = (status) => {
     switch (status) {
       case 'APPROVED': return 'bg-green-100 text-green-700 border-green-200';
