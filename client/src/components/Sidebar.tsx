@@ -34,17 +34,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   useEffect(() => {
     if (socket && isConnected) {
-        console.log("🔄 Sidebar: Socket activo, pidiendo contactos...");
         socket.emit('request_contacts');
     }
   }, [socket, isConnected]);
-
-  // Debug: Ver usuarios online recibidos en Sidebar
-  useEffect(() => {
-    if (onlineUsers.length > 0) {
-        console.log("👥 Sidebar recibió usuarios online:", onlineUsers);
-    }
-  }, [onlineUsers]);
 
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
@@ -108,31 +100,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       return true;
   });
 
-  // HELPER MEJORADO: Coincidencia flexible (contiene o es igual)
-  const checkOnline = (contact: Contact) => {
-      if (!onlineUsers || onlineUsers.length === 0) return false;
-      
-      const cName = (contact.name || "").toLowerCase().trim();
-      const cPhone = (contact.phone || "").replace(/\D/g, ""); // Solo números
-      
-      return onlineUsers.some(u => {
-          const userLogged = u.toLowerCase().trim();
-          
-          // 1. Coincidencia por teléfono (si el agente se loguea con móvil)
-          if (cPhone && userLogged === cPhone) return true;
-
-          // 2. Coincidencia por nombre (Flexible)
-          if (cName) {
-              // Exacta: "paco" === "paco"
-              if (userLogged === cName) return true;
-              // Parcial: "paco el talleres" incluye "paco"
-              if (cName.length > 2 && (userLogged.includes(cName) || cName.includes(userLogged))) return true;
-          }
-          
-          return false;
-      });
-  };
-
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       <div className="p-4 border-b border-gray-200 bg-white">
@@ -147,6 +114,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             <button onClick={() => setFilter('unassigned')} className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${filter === 'unassigned' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Sin Asignar</button>
         </div>
       </div>
+      
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
@@ -158,22 +126,17 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         ) : (
           <ul className="divide-y divide-gray-100">
             {filteredContacts.map((contact) => {
-              // --- LÓGICA VISUAL ---
               const isTyping = typingStatus[contact.phone];
-              // Usamos la nueva verificación flexible
-              const isOnline = checkOnline(contact);
+              // NOTA: Eliminamos la lógica de 'isOnline' aquí porque los clientes NO están online en el sistema
 
               return (
                 <li key={contact.id || Math.random()}>
                   <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
                     
-                    {/* AVATAR + PUNTO VERDE */}
                     <div className="relative">
                         <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
                           {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
                         </div>
-                        {/* Indicador Online */}
-                        {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full ring-2 ring-white z-10"></span>}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -196,6 +159,26 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
           </ul>
         )}
       </div>
+
+      {/* SECCIÓN NUEVA: VISUALIZADOR DE AGENTES ONLINE */}
+      {onlineUsers.length > 0 && (
+        <div className="bg-slate-50 border-t border-slate-200 p-3">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                Equipo Online ({onlineUsers.length})
+            </h3>
+            <div className="flex flex-wrap gap-2">
+                {onlineUsers.map((agentName, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                        <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
+                            {agentName === user.username ? 'Tú' : agentName}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+      )}
     </div>
   );
 }
