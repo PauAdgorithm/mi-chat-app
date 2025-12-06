@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, UserCheck, Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save } from 'lucide-react';
+import { Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, UserCheck, Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
@@ -50,7 +50,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
-  // Datos CRM Locales (para edición)
+  // Datos CRM Locales
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -58,7 +58,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [crmEmail, setCrmEmail] = useState('');
   const [crmAddress, setCrmAddress] = useState('');
   const [crmNotes, setCrmNotes] = useState('');
-  const [crmSignupDate, setCrmSignupDate] = useState(''); // Estado para la fecha
+  const [crmSignupDate, setCrmSignupDate] = useState('');
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -67,7 +67,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [showAssignMenu, setShowAssignMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false); 
   const [isInternalMode, setIsInternalMode] = useState(false); 
-  const [isSaving, setIsSaving] = useState(false); 
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // NUEVOS ESTADOS PARA BÚSQUEDA
+  const [showSearch, setShowSearch] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
 
   const typingUser = typingInfo[contact.phone] || null;
   const isOnline = onlineUsers.some(u => {
@@ -90,18 +94,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com' : 'http://localhost:3000';
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  useEffect(() => scrollToBottom(), [messages]);
+  useEffect(() => scrollToBottom(), [messages, chatSearchQuery]); // Scroll al filtrar
 
   useEffect(() => {
     setName(contact.name || ''); 
     setDepartment(contact.department || ''); 
     setStatus(contact.status || '');
     setAssignedTo(contact.assigned_to || '');
-    
     setCrmEmail(contact.email || '');
     setCrmAddress(contact.address || '');
     setCrmNotes(contact.notes || '');
-    setCrmSignupDate(contact.signup_date || ''); // Inicializar fecha
+    setCrmSignupDate(contact.signup_date || '');
     
     setMessages([]); 
     setShowEmojiPicker(false); 
@@ -110,10 +113,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
     
+    // Resetear búsqueda al cambiar de chat
+    setShowSearch(false);
+    setChatSearchQuery('');
+    
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact.id, socket]); 
 
-  // Sync reactiva (excluyendo campos de texto largo para no interrumpir escritura)
   useEffect(() => {
       if (contact.name) setName(contact.name);
       if (contact.department) setDepartment(contact.department);
@@ -224,14 +230,20 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
+  // --- FILTRADO DE MENSAJES PARA EL BUSCADOR ---
+  const messagesToRender = chatSearchQuery 
+      ? messages.filter(m => m.text && m.text.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+      : messages;
+
   const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
 
-  for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
+  for (let i = 0; i < messagesToRender.length; i++) {
+      const m = messagesToRender[i];
       const dateLabel = getDateLabel(m.timestamp);
       
-      if (dateLabel && dateLabel !== lastDateLabel) {
+      // Solo mostramos separadores de fecha si NO estamos buscando (para no confundir)
+      if (!chatSearchQuery && dateLabel && dateLabel !== lastDateLabel) {
           renderedItems.push(
               <div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6">
                   <span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-sm border border-slate-300/50">{dateLabel}</span>
@@ -250,10 +262,25 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             
             <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
+                
+                {/* Contenido del mensaje */}
                 {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
                 : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                 : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
-                : <p className="whitespace-pre-wrap break-words">{String(m.text || "")}</p>}
+                : <p className="whitespace-pre-wrap break-words">
+                    {/* Resaltar texto si hay búsqueda */}
+                    {chatSearchQuery ? (
+                        <>
+                            {String(m.text || "").split(new RegExp(`(${chatSearchQuery})`, 'gi')).map((part, idx) => 
+                                part.toLowerCase() === chatSearchQuery.toLowerCase() 
+                                    ? <span key={idx} className="bg-yellow-200 text-yellow-900 font-bold">{part}</span> 
+                                    : part
+                            )}
+                        </>
+                    ) : String(m.text || "")}
+                  </p>
+                }
+                
                 <span className={`text-[10px] block text-right mt-1 opacity-70 ${isNote ? 'text-yellow-600' : 'text-slate-400'}`}>{safeTime(m.timestamp)}</span>
             </div>
           </div>
@@ -262,7 +289,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   }
 
   return (
-    <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
+    <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowSearch(false); }}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
       <div className="flex flex-col flex-1 min-w-0 h-full border-r border-gray-200">
@@ -294,11 +321,35 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             )}
 
             <div className="flex-1"></div>
+            
+            {/* BOTÓN BUSCAR */}
+            <div className="relative">
+                {showSearch ? (
+                    <div className="flex items-center bg-slate-100 rounded-lg px-2 py-1 animate-in fade-in slide-in-from-right-5 absolute right-0 top-0 md:static z-20 shadow-md md:shadow-none min-w-[200px]">
+                        <Search className="w-4 h-4 text-slate-400 mr-2" />
+                        <input autoFocus className="bg-transparent border-none outline-none text-xs w-full text-slate-700" placeholder="Buscar en chat..." value={chatSearchQuery} onChange={(e) => setChatSearchQuery(e.target.value)} onClick={(e) => e.stopPropagation()} />
+                        <button onClick={(e) => { e.stopPropagation(); setShowSearch(false); setChatSearchQuery(''); }} className="ml-1 p-1 hover:bg-slate-200 rounded-full"><X className="w-3 h-3 text-slate-500"/></button>
+                    </div>
+                ) : (
+                    <button onClick={(e) => { e.stopPropagation(); setShowSearch(true); }} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-500 transition" title="Buscar en conversación"><Search className="w-5 h-5"/></button>
+                )}
+            </div>
+
+            {/* BOTÓN INFO */}
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
-          <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); }}>
+          <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowSearch(false); }}>
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
+            
+            {/* Si buscamos y no hay resultados */}
+            {chatSearchQuery && renderedItems.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                    <Search className="w-10 h-10 mb-2 opacity-30" />
+                    <p className="text-sm">No se encontraron mensajes.</p>
+                </div>
+            )}
+
             {renderedItems}
             <div ref={messagesEndRef} />
           </div>
