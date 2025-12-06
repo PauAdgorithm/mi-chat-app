@@ -2,117 +2,99 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-require('dotenv').config(); // Para leer variables de entorno .env
+require('dotenv').config(); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de Meta (Pon esto en tu archivo .env)
-const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN; // Tu token permanente
-const BUSINESS_ACCOUNT_ID = process.env.WHATSAPP_BUSINESS_ID; // ID de tu cuenta de negocio
+// Configuración de Meta
+const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN; 
+const BUSINESS_ACCOUNT_ID = process.env.WHATSAPP_BUSINESS_ID; 
 
-// Middleware
-app.use(cors()); // Permite peticiones desde tu React
+app.use(cors()); 
 app.use(bodyParser.json());
 
+// --- BASE DE DATOS SIMULADA (Sustituir por Prisma/MongoDB) ---
+let db_templates = [
+  // Datos iniciales de ejemplo
+];
+
 /**
- * RUTA 1: CREAR PLANTILLA
- * Recibe los datos del Frontend y los envía a Meta Graph API
+ * RUTA 1: OBTENER PLANTILLAS (GET)
+ * Carga las plantillas guardadas al iniciar la app
+ */
+app.get('/api/templates', (req, res) => {
+  // TODO: PRISMA -> const templates = await prisma.template.findMany();
+  res.json(db_templates);
+});
+
+/**
+ * RUTA 2: CREAR PLANTILLA (POST)
+ * Guarda en DB local y envía a Meta
  */
 app.post('/api/create-template', async (req, res) => {
   try {
-    const { name, category, body, language, footer } = req.body;
-
-    // 1. Limpieza básica del nombre (Meta es estricto: solo minúsculas y guiones bajos)
+    const { name, category, body, language, footer, variableExamples } = req.body;
     const formattedName = name.toLowerCase().trim().replace(/\s+/g, '_');
 
-    // 2. Construir el payload para Meta
+    // 1. Preparar Payload para Meta
     const metaPayload = {
       name: formattedName,
-      category: category, // MARKETING, UTILITY, AUTHENTICATION
+      category: category,
       allow_category_change: true,
       language: language,
       components: [
-        {
-          type: "BODY",
-          text: body
+        { 
+          type: "BODY", 
+          text: body,
+          // Meta pide ejemplos de variables si existen
+          ...(variableExamples && Object.keys(variableExamples).length > 0 && {
+             example: {
+               body_text: [Object.values(variableExamples)] // Ej: ["Juan", "#123"]
+             }
+          })
         }
       ]
     };
 
-    // Añadir footer si existe
     if (footer && footer.trim().length > 0) {
-      metaPayload.components.push({
-        type: "FOOTER",
-        text: footer
-      });
+      metaPayload.components.push({ type: "FOOTER", text: footer });
     }
 
-    // 3. Enviar petición a Meta API
-    console.log(`Enviando plantilla ${formattedName} a Meta...`);
-    
-    const response = await axios.post(
-      `https://graph.facebook.com/v18.0/${BUSINESS_ACCOUNT_ID}/message_templates`,
-      metaPayload,
-      {
-        headers: {
-          'Authorization': `Bearer ${ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    console.log(`Enviando a Meta: ${formattedName}`);
 
-    // 4. Éxito
-    console.log("Plantilla creada en Meta con ID:", response.data.id);
-    res.json({ 
-      success: true, 
-      id: response.data.id,
-      status: response.data.status || 'PENDING'
-    });
+    // 2. Enviar a Meta (Descomentar con credenciales reales)
+    // const response = await axios.post(...)
+    
+    // Simulación de respuesta de Meta
+    const metaId = "meta_" + Date.now(); 
+    const status = "PENDING"; // Meta siempre las crea en PENDING
+
+    // 3. Guardar en Base de Datos Local
+    const newTemplate = {
+      id: Date.now(),
+      metaId: metaId,
+      name: formattedName,
+      category,
+      language,
+      body,
+      footer,
+      status,
+      variableMapping: variableExamples, // Guardamos qué significa cada variable
+      lastUpdated: new Date().toLocaleDateString()
+    };
+
+    // TODO: PRISMA -> await prisma.template.create({ data: newTemplate });
+    db_templates.unshift(newTemplate); // Añadir al principio
+
+    res.json({ success: true, template: newTemplate });
 
   } catch (error) {
-    // Manejo de errores de Meta
-    const metaError = error.response ? error.response.data : error.message;
-    console.error("Error creando plantilla:", JSON.stringify(metaError, null, 2));
-    
-    res.status(400).json({ 
-      success: false, 
-      error: metaError.error ? metaError.error.message : 'Error desconocido al contactar con Meta'
-    });
+    console.error("Error:", error);
+    res.status(400).json({ success: false, error: error.message });
   }
 });
 
-/**
- * RUTA 2: WEBHOOK (Opcional por ahora)
- * Aquí Meta te avisará cuando aprueben o rechacen la plantilla
- */
-app.post('/webhook', (req, res) => {
-  // Verificación básica del webhook
-  // Aquí recibirás eventos como 'message_template_status_update'
-  console.log("Evento recibido del Webhook:", JSON.stringify(req.body, null, 2));
-  
-  // TODO: Actualizar estado en tu base de datos local
-  
-  res.sendStatus(200);
-});
-
-// Verificación del webhook (GET) requerida por Meta al configurarlo
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  
-  if (mode && token) {
-    if (mode === 'subscribe' && token === process.env.WEBHOOK_VERIFY_TOKEN) {
-      console.log('Webhook verificado!');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  }
-});
-
-// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`Servidor Backend corriendo en http://localhost:${PORT}`);
 });
