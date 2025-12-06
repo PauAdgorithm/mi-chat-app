@@ -239,8 +239,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10" onClick={(e) => e.stopPropagation()}>
         {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
         
-        {/* HEADER: Nombre y Estado */}
-        <div className="flex flex-col w-full md:w-auto md:flex-1 md:max-w-md min-w-[200px]">
+        {/* HEADER: Nombre con ancho moderado */}
+        <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
             <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                 <User className="w-4 h-4 text-slate-400" />
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
@@ -294,12 +294,12 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                 )}
             </div>
         ) : (
-            // Si NO es nuevo, mostramos los selectores de siempre + el NUEVO selector de agente
+            // SELECTORES NORMALES + AGENTE (Con ancho mejorado)
             <>
                 <div className="flex items-center gap-2 bg-blue-50 px-2 rounded-md border border-blue-200">
                     <UserCheck className="w-4 h-4 text-blue-600" />
                     <select 
-                        className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-blue-700 focus:ring-0 cursor-pointer font-bold tracking-wide min-w-[140px] max-w-[200px]" 
+                        className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-blue-700 focus:ring-0 cursor-pointer font-bold tracking-wide min-w-[120px]" 
                         value={assignedTo} 
                         onChange={(e) => { 
                             setAssignedTo(e.target.value); 
