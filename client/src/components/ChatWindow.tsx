@@ -9,7 +9,7 @@ interface ChatWindowProps {
   contact: Contact;
   config?: { departments: string[]; statuses: string[]; };
   onBack: () => void;
-  // NUEVOS PROPS RECIBIDOS DE APP
+  // Props de estado global
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
 }
@@ -52,21 +52,30 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // USAMOS LAS PROPS QUE VIENEN DE APP
   const typingUser = typingInfo[contact.phone] || null;
   
-  // MEJORA: Comprobación robusta (ignora mayúsculas/minúsculas y valida undefined)
-  const isOnline = onlineUsers.some(onlineUser => 
-      onlineUser.toLowerCase() === contact.phone.toLowerCase() || 
-      (contact.name && onlineUser.toLowerCase() === contact.name.toLowerCase())
-  );
+  // LÓGICA DE COINCIDENCIA MÁS FLEXIBLE (Para que "Paco" coincida con "Paco el talleres")
+  const isOnline = onlineUsers.some(onlineUser => {
+      if (!onlineUser) return false;
+      const u = onlineUser.toLowerCase().trim();
+      const cName = (contact.name || '').toLowerCase().trim();
+      const cPhone = (contact.phone || '').replace(/\D/g, ''); // Solo números
 
-  // DEBUG: Esto mostrará en la consola del navegador quién está conectado realmente
+      // 1. Coincidencia exacta de nombre
+      if (cName && u === cName) return true;
+      
+      // 2. Coincidencia parcial (útil si el contacto es "Paco" y el login es "Paco el talleres")
+      if (cName.length > 3 && (u.includes(cName) || cName.includes(u))) return true;
+
+      // 3. Coincidencia por teléfono (si el usuario se loguea con el número)
+      if (cPhone && u === cPhone) return true;
+
+      return false;
+  });
+
+  // DEBUG: Abre la consola del navegador (F12) para ver por qué no coincide
   useEffect(() => {
-      console.log(`🕵️ Estado Online para chat ${contact.name || contact.phone}:`, {
-          estaOnline: isOnline,
-          listaUsuariosConectados: onlineUsers,
-          coincidePorTelefono: onlineUsers.some(u => u.toLowerCase() === contact.phone.toLowerCase()),
-          // Corrección: Usamos 'contact.name!' porque ya hemos verificado 'contact.name ?' antes
-          coincidePorNombre: contact.name ? onlineUsers.some(u => u.toLowerCase() === contact.name!.toLowerCase()) : false
-      });
+      console.log(`🔍 Revisando estado online para: "${contact.name}" (${contact.phone})`);
+      console.log(`📋 Usuarios conectados (Frontend):`, onlineUsers);
+      console.log(`✅ ¿Está online?:`, isOnline ? 'SÍ' : 'NO');
   }, [onlineUsers, contact, isOnline]);
 
   const lastTypingTimeRef = useRef<number>(0);
@@ -99,7 +108,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     if (socket) {
         socket.on('conversation_history', handleHistory);
         socket.on('message', handleNewMessage);
-        
         return () => { 
             socket.off('conversation_history', handleHistory); 
             socket.off('message', handleNewMessage); 
@@ -109,9 +117,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setInput(e.target.value);
-      
       const now = Date.now();
-      // Emitir evento con debounce de 2 segundos
       if (socket && (now - lastTypingTimeRef.current > 2000)) {
           socket.emit('typing', { user: user.username, phone: contact.phone });
           lastTypingTimeRef.current = now;
@@ -148,7 +154,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                 <input className="text-sm font-semibold text-slate-700 border-none focus:ring-0 w-full bg-transparent py-1.5" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => updateCRM('name', name)} />
             </div>
             
-            {/* ESTADO CON TU DISEÑO ORIGINAL + LÓGICA */}
+            {/* ESTADO CON DISEÑO ORIGINAL */}
             <div className={`overflow-hidden transition-all duration-300 ${(typingUser || isOnline) ? 'max-h-6 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                 {typingUser ? (
                     <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit">
