@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, Search, RefreshCw, UserCheck, Briefcase, Filter, User, ChevronDown, X } from 'lucide-react';
+import { 
+  Users, 
+  Search, 
+  RefreshCw, 
+  UserCheck, 
+  Briefcase, 
+  Filter, 
+  User, 
+  ChevronDown, 
+  X, 
+  Hash // <--- Importado para las etiquetas
+} from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -14,7 +25,8 @@ export interface Contact {
   email?: string;
   address?: string;
   notes?: string;
-  signup_date?: string; // AÑADIDO
+  signup_date?: string; 
+  tags?: string[]; // <--- Campo Tags Añadido
 }
 
 // Interfaces para los desplegables
@@ -36,8 +48,8 @@ type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
 
 // Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
-    if (!phone) return "";
-    return phone.replace(/\D/g, "");
+  if (!phone) return "";
+  return phone.replace(/\D/g, "");
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {} }: SidebarProps) {
@@ -237,6 +249,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             {filteredContacts.map((contact) => {
               const isTyping = typingStatus[contact.phone];
               const unread = unreadCounts[normalizePhone(contact.phone)] || 0;
+              const isSelected = selectedContactId === contact.id;
 
               return (
                 <li key={contact.id || Math.random()}>
@@ -266,8 +279,17 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                           )}
                       </div>
 
-                      <div className="flex gap-1 mt-2 flex-wrap">
+                      <div className="flex gap-1 mt-2 flex-wrap items-center">
                           {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
+                          
+                          {/* --- AQUI SE MUESTRAN LAS ETIQUETAS (TAGS) --- */}
+                          {contact.tags && contact.tags.slice(0, 2).map(tag => (
+                              <span key={tag} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-700 border border-orange-100">
+                                <Hash size={8} /> {tag}
+                              </span>
+                          ))}
+                          {contact.tags && contact.tags.length > 2 && <span className="text-[9px] text-slate-400">+{contact.tags.length - 2}</span>}
+                          
                           {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
                           {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                       </div>

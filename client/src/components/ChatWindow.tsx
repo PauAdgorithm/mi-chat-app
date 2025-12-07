@@ -1,13 +1,10 @@
-// ... (Imports y código anterior igual hasta la función ChatWindow) ...
-// IMPORTANTE: Asegúrate de mantener los imports que ya tenías
-
 import { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, 
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate // Asegúrate de tener este importado
+  LayoutTemplate, Tag 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -16,7 +13,7 @@ interface ChatWindowProps {
   socket: any;
   user: { username: string };
   contact: Contact;
-  config?: { departments: string[]; statuses: string[]; };
+  config?: { departments: string[]; statuses: string[]; tags: string[] };
   onBack: () => void;
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
@@ -59,13 +56,13 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
 };
 
 export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates }: ChatWindowProps) {
-  // ... (Estados y lógica igual que antes) ...
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
+  // Datos CRM Locales
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -75,6 +72,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [crmNotes, setCrmNotes] = useState('');
   const [crmSignupDate, setCrmSignupDate] = useState('');
   
+  // ESTADO PARA TAGS DEL CLIENTE ACTUAL
+  const [contactTags, setContactTags] = useState<string[]>(contact.tags || []);
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   
@@ -115,12 +115,34 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   };
   useEffect(() => scrollToBottom(), [messages]); 
 
-  // ... (UseEffects de inicialización iguales) ...
+  // --- USE EFFECTS ---
+
   useEffect(() => {
-    setName(contact.name || ''); setDepartment(contact.department || ''); setStatus(contact.status || ''); setAssignedTo(contact.assigned_to || ''); setCrmEmail(contact.email || ''); setCrmAddress(contact.address || ''); setCrmNotes(contact.notes || ''); setCrmSignupDate(contact.signup_date || ''); setMessages([]); setShowEmojiPicker(false); setIsRecording(false); setShowAssignMenu(false); setShowDetailsPanel(false); setIsInternalMode(false); setShowSearch(false); setChatSearchQuery(''); setSearchMatches([]); setCurrentMatchIdx(0); if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
+    setName(contact.name || ''); 
+    setDepartment(contact.department || ''); 
+    setStatus(contact.status || '');
+    setAssignedTo(contact.assigned_to || '');
+    setCrmEmail(contact.email || '');
+    setCrmAddress(contact.address || '');
+    setCrmNotes(contact.notes || '');
+    setCrmSignupDate(contact.signup_date || '');
+    setContactTags(contact.tags || []);
+    
+    setMessages([]); 
+    setShowEmojiPicker(false); 
+    setIsRecording(false);
+    setShowAssignMenu(false); 
+    setShowDetailsPanel(false); 
+    setIsInternalMode(false);
+    
+    setShowSearch(false);
+    setChatSearchQuery('');
+    setSearchMatches([]);
+    setCurrentMatchIdx(0);
+    
+    if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact.id, socket]); 
 
-  // ... (Lógica de búsqueda igual) ...
   useEffect(() => {
       if (!chatSearchQuery.trim()) { setSearchMatches([]); setCurrentMatchIdx(0); return; }
       const matches: SearchMatch[] = []; const regex = new RegExp(chatSearchQuery, 'gi');
@@ -129,20 +151,46 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   }, [chatSearchQuery, messages]);
 
   useEffect(() => { if (searchMatches.length > 0 && searchMatches[currentMatchIdx]) { const { msgIndex, matchIndex } = searchMatches[currentMatchIdx]; const elementId = `match-${msgIndex}-${matchIndex}`; const el = document.getElementById(elementId); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }, [currentMatchIdx, searchMatches]);
+  
   const handleNextMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev + 1) % searchMatches.length); };
   const handlePrevMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length); };
 
-  useEffect(() => { if (contact.name) setName(contact.name); if (contact.department) setDepartment(contact.department); if (contact.status) setStatus(contact.status); if (contact.assigned_to) setAssignedTo(contact.assigned_to); if (contact.signup_date) setCrmSignupDate(contact.signup_date); }, [contact]); 
+  useEffect(() => { 
+      if (contact.name) setName(contact.name); 
+      if (contact.department) setDepartment(contact.department); 
+      if (contact.status) setStatus(contact.status); 
+      if (contact.assigned_to) setAssignedTo(contact.assigned_to); 
+      if (contact.signup_date) setCrmSignupDate(contact.signup_date);
+      if (contact.tags) setContactTags(contact.tags);
+  }, [contact]); 
+
   useEffect(() => { if (socket) { socket.emit('request_agents'); const handleAgentsList = (list: Agent[]) => setAgents(list); socket.on('agents_list', handleAgentsList); return () => { socket.off('agents_list', handleAgentsList); }; } }, [socket]);
   useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
+  
   const sendMessage = (e: React.FormEvent) => { e.preventDefault(); if (input.trim()) { const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); } };
-  const updateCRM = (field: string, value: string) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
+  
+  const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
+  
+  // --- LÓGICA GESTIÓN DE TAGS ---
+  const toggleTag = (tag: string) => {
+      let newTags = [...contactTags];
+      if (newTags.includes(tag)) {
+          newTags = newTags.filter(t => t !== tag);
+      } else {
+          newTags.push(tag);
+      }
+      setContactTags(newTags);
+      updateCRM('tags', newTags); 
+  };
+
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
+  
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
   const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; } };
+  
   const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
@@ -163,7 +211,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
       const isMe = m.sender !== contact.phone;
       const isNote = m.type === 'note';
-      const isTemplate = m.type === 'template'; // Detectar si es plantilla
+      const isTemplate = m.type === 'template';
 
       let messageContent: React.ReactNode = String(m.text || "");
       
@@ -182,7 +230,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'} ${isTemplate ? 'border-l-4 border-l-green-500 bg-green-50' : ''}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
                 
-                {/* INDICADOR DE PLANTILLA */}
                 {isTemplate && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-green-700"><LayoutTemplate className="w-3 h-3" /> Plantilla WhatsApp</div>}
                 
                 {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
@@ -197,14 +244,12 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       );
   }
 
-  // ... (Resto del render y modales igual) ...
   return (
     <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowSearch(false); }}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
       <div className="flex flex-col flex-1 min-w-0 h-full border-r border-gray-200">
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {/* ... HEADER DEL CHAT ... */}
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
             <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
@@ -215,7 +260,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
-            {/* ... RESTO DEL HEADER ... */}
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -229,7 +273,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                 </>
             )}
             <div className="flex-1"></div>
-            {/* BUSCAR */}
             <div className="relative">
                 {showSearch ? (
                     <div className="flex items-center bg-slate-100 rounded-lg px-2 py-1 animate-in fade-in slide-in-from-right-5 absolute right-0 top-0 md:static z-20 shadow-md md:shadow-none min-w-[280px]">
@@ -246,7 +289,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     <button onClick={(e) => { e.stopPropagation(); setShowSearch(true); }} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-500 transition" title="Buscar en conversación"><Search className="w-5 h-5"/></button>
                 )}
             </div>
-            {/* INFO */}
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
@@ -263,7 +305,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
               
-              {/* BOTÓN PLANTILLAS AÑADIDO AQUÍ */}
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
@@ -278,13 +319,32 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
       {showDetailsPanel && (
           <div className="w-80 bg-white border-l border-gray-200 shadow-xl flex flex-col h-full animate-in slide-in-from-right duration-300 shrink-0 z-30">
-              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50"><h3 className="font-bold text-slate-700">Detalles del Cliente</h3><button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button></div>
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                  <h3 className="font-bold text-slate-700">Detalles del Cliente</h3>
+                  <button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button>
+              </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
                   <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-3 border-4 border-white shadow-sm">{contact.avatar ? <img src={contact.avatar} className="w-full h-full rounded-full object-cover"/> : <User className="w-10 h-10"/>}</div>
                       <h2 className="text-lg font-bold text-slate-800 text-center">{name || "Sin nombre"}</h2>
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
+
+                  <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Etiquetas</label>
+                      <div className="flex flex-wrap gap-2">
+                          {config?.tags?.map(tag => {
+                              const isActive = contactTags.includes(tag);
+                              return (
+                                  <button key={tag} onClick={() => toggleTag(tag)} className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${isActive ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-orange-200 hover:text-orange-600'}`}>
+                                      {isActive ? '✓ ' : '+ '}{tag}
+                                  </button>
+                              )
+                          })}
+                          {(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic">No hay etiquetas configuradas.</p>}
+                      </div>
+                  </div>
+
                   <div className="space-y-4">
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><Mail className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} /></div></div>
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><MapPin className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/></div></div>
