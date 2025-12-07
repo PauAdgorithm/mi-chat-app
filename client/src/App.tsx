@@ -33,7 +33,6 @@ function App() {
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); 
 
-  // ESTADO CONFIG AHORA CON TAGS
   const [config, setConfig] = useState<{departments: string[], statuses: string[], tags: string[]}>({ 
       departments: [], 
       statuses: [],
@@ -59,7 +58,6 @@ function App() {
     socket.on('online_users_update', onOnlineUsersUpdate);
     socket.on('remote_typing', onRemoteTyping);
 
-    // LÓGICA DE CONFIG (Añadido parser para Tags)
     socket.on('config_list', (list: any[]) => {
         const depts = list.filter(i => i.type === 'Department').map(i => i.name);
         const stats = list.filter(i => i.type === 'Status').map(i => i.name);

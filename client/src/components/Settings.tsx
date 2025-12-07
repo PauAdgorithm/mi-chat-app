@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
-  LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag // <--- Tag Importado
+  LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag 
 } from 'lucide-react';
 
 // @ts-ignore
@@ -71,7 +71,7 @@ export function Settings({ onBack, socket, currentUserRole }: SettingsProps) {
 
   const departments = configList.filter(c => c.type === 'Department');
   const statuses = configList.filter(c => c.type === 'Status');
-  const tags = configList.filter(c => c.type === 'Tag'); // <--- NUEVO FILTRO
+  const tags = configList.filter(c => c.type === 'Tag'); 
 
   const handleTabClick = (tab: 'team' | 'config' | 'whatsapp') => { setActiveTab(tab); setShowMobileMenu(false); };
   const handleBack = () => { if (!showMobileMenu) setShowMobileMenu(true); else onBack(); };
@@ -111,13 +111,9 @@ export function Settings({ onBack, socket, currentUserRole }: SettingsProps) {
 
               {activeTab === 'config' && (
                   <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 pb-10">
-                      {/* Deptos */}
                       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-fit"><div className="flex justify-between items-center mb-4"><h2 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2"><Briefcase className="w-5 h-5 text-purple-500"/> Departamentos</h2><button onClick={() => openAddConfig('Department')} className="bg-purple-100 text-purple-700 p-2 rounded-lg hover:bg-purple-200 transition"><Plus className="w-4 h-4"/></button></div><div className="space-y-2">{departments.map(d => (<div key={d.id} className="flex justify-between items-center p-3 bg-purple-50 rounded-xl border border-purple-100 text-purple-700 text-sm font-medium group"><span className="truncate">{d.name}</span><div className="flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0"><button onClick={() => openEditConfig(d)} className="p-1.5 bg-white rounded-md hover:text-purple-900 shadow-sm"><Pencil className="w-3.5 h-3.5"/></button><button onClick={() => openDeleteConfig(d)} className="p-1.5 bg-white rounded-md hover:text-red-600 shadow-sm"><Trash2 className="w-3.5 h-3.5"/></button></div></div>))}</div></div>
-                      
-                      {/* Status */}
                       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-fit"><div className="flex justify-between items-center mb-4"><h2 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-500"/> Estados</h2><button onClick={() => openAddConfig('Status')} className="bg-green-100 text-green-700 p-2 rounded-lg hover:bg-green-200 transition"><Plus className="w-4 h-4"/></button></div><div className="space-y-2">{statuses.map(s => (<div key={s.id} className="flex justify-between items-center p-3 bg-green-50 rounded-xl border border-green-100 text-green-700 text-sm font-medium group"><span className="truncate">{s.name}</span><div className="flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0"><button onClick={() => openEditConfig(s)} className="p-1.5 bg-white rounded-md hover:text-green-900 shadow-sm"><Pencil className="w-3.5 h-3.5"/></button><button onClick={() => openDeleteConfig(s)} className="p-1.5 bg-white rounded-md hover:text-red-600 shadow-sm"><Trash2 className="w-3.5 h-3.5"/></button></div></div>))}</div></div>
-
-                      {/* NUEVA COLUMNA: TAGS */}
+                      {/* COLUMNA TAGS */}
                       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-fit"><div className="flex justify-between items-center mb-4"><h2 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2"><Tag className="w-5 h-5 text-orange-500"/> Etiquetas</h2><button onClick={() => openAddConfig('Tag')} className="bg-orange-100 text-orange-700 p-2 rounded-lg hover:bg-orange-200 transition"><Plus className="w-4 h-4"/></button></div><div className="space-y-2">{tags.map(t => (<div key={t.id} className="flex justify-between items-center p-3 bg-orange-50 rounded-xl border border-orange-100 text-orange-700 text-sm font-medium group"><span className="truncate">{t.name}</span><div className="flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0"><button onClick={() => openEditConfig(t)} className="p-1.5 bg-white rounded-md hover:text-orange-900 shadow-sm"><Pencil className="w-3.5 h-3.5"/></button><button onClick={() => openDeleteConfig(t)} className="p-1.5 bg-white rounded-md hover:text-red-600 shadow-sm"><Trash2 className="w-3.5 h-3.5"/></button></div></div>))}</div></div>
                   </div>
               )}
@@ -136,10 +132,7 @@ export function Settings({ onBack, socket, currentUserRole }: SettingsProps) {
                   <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-slate-800">{modalType.includes('create') || modalType.includes('add') ? 'Crear' : modalType.includes('edit') ? 'Editar' : 'Eliminar'}</h3><button onClick={closeModal} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><X className="w-5 h-5 text-slate-600"/></button></div>
                   <form onSubmit={handleSubmit} className="space-y-5 pb-safe">
                       {(modalType.includes('agent') && !modalType.includes('delete')) && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: Laura" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Rol</label><select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"><option value="Ventas">Ventas</option><option value="Taller">Taller</option><option value="Admin">Admin</option></select></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contraseña</label><input type="password" value={formPass} onChange={e => setFormPass(e.target.value)} placeholder={modalType === 'edit_agent' ? "Nueva contraseña (Opcional)" : "Contraseña (Opcional)"} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" /></div></>)}
-                      
-                      {/* Formulario genérico para Deptos, Estados Y TAGS */}
                       {(modalType.includes('config') && !modalType.includes('delete')) && (<div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre {formType === 'Department' ? 'Departamento' : formType === 'Status' ? 'Estado' : 'Etiqueta'}</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: VIP" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>)}
-                      
                       {(modalType.includes('delete')) && <div className="bg-red-50 p-4 rounded-xl text-red-600 text-sm font-medium border border-red-100">¿Estás seguro? Esta acción es irreversible.</div>}
                       <button type="submit" className={`w-full py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition-transform ${modalType.includes('delete') ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-200'}`}>Confirmar Acción</button>
                   </form>

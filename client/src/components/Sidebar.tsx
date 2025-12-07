@@ -15,7 +15,7 @@ export interface Contact {
   address?: string;
   notes?: string;
   signup_date?: string;
-  tags?: string[]; // <--- NUEVO CAMPO
+  tags?: string[]; 
 }
 
 interface SidebarProps {
@@ -30,7 +30,7 @@ interface SidebarProps {
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected, onlineUsers, typingStatus }: SidebarProps) {
   const [contacts, setContacts] = React.useState<Contact[]>([]);
-  const [filter, setFilter] = React.useState('all'); // all, assigned, unread
+  const [filter, setFilter] = React.useState('all');
 
   React.useEffect(() => {
     if (socket) {
@@ -43,7 +43,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const filteredContacts = contacts.filter(c => {
     if (filter === 'assigned') return c.assigned_to === user.username;
-    if (filter === 'unread') return false; // Implementar lógica no leídos si quieres
     return true; 
   });
 
@@ -55,13 +54,11 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header Filtros */}
       <div className="p-4 border-b border-gray-100 flex gap-2 overflow-x-auto no-scrollbar">
         <button onClick={() => setFilter('all')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Todos</button>
         <button onClick={() => setFilter('assigned')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${filter === 'assigned' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>Mis Chats</button>
       </div>
 
-      {/* Lista Contactos */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.map(contact => {
           const isSelected = contact.id === selectedContactId;
@@ -83,12 +80,10 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
               </p>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Status Badge */}
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${contact.status === 'Nuevo' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                   {contact.status}
                 </span>
                 
-                {/* Tags Badges (Visualización en lista) */}
                 {contact.tags && contact.tags.slice(0, 2).map(tag => (
                   <span key={tag} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-700 border border-orange-100">
                     <Hash size={8} /> {tag}
