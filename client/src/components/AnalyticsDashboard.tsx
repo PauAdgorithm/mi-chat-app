@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart3, 
-  Users, 
-  MessageSquare, 
-  TrendingUp, 
-  UserCheck, 
-  Calendar 
+  BarChart3, Users, MessageSquare, TrendingUp, UserCheck, Calendar,
+  MessageCircle, MessagesSquare // Iconos nuevos
 } from 'lucide-react';
 
 const AnalyticsDashboard = () => {
@@ -28,13 +24,9 @@ const AnalyticsDashboard = () => {
       });
   }, []);
 
-  if (loading) {
-    return <div className="h-full flex items-center justify-center text-slate-400">Cargando datos...</div>;
-  }
-
+  if (loading) return <div className="h-full flex items-center justify-center text-slate-400">Cargando datos...</div>;
   if (!data) return <div className="p-10 text-center text-red-400">No se pudieron cargar los datos.</div>;
 
-  // Encontrar el valor máximo para escalar la gráfica
   const maxActivity = Math.max(...data.activity.map((d:any) => d.count), 1);
 
   return (
@@ -81,22 +73,15 @@ const AnalyticsDashboard = () => {
           <h3 className="font-bold text-slate-700 mb-6 flex items-center gap-2">
             <Calendar size={18} className="text-slate-400"/> Mensajes (Últimos 7 días)
           </h3>
-          
           <div className="h-48 flex items-end justify-between gap-2">
             {data.activity.map((day: any, i: number) => {
               const heightPercent = (day.count / maxActivity) * 100;
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
                   <div className="w-full bg-slate-100 rounded-t-lg relative overflow-hidden transition-all hover:bg-blue-50" style={{ height: '100%' }}>
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 bg-blue-500 rounded-t-lg transition-all duration-500 group-hover:bg-blue-600"
-                      style={{ height: `${heightPercent}%` }}
-                    ></div>
+                    <div className="absolute bottom-0 left-0 right-0 bg-blue-500 rounded-t-lg transition-all duration-500 group-hover:bg-blue-600" style={{ height: `${heightPercent}%` }}></div>
                   </div>
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded pointer-events-none">
-                    {day.count} msgs
-                  </div>
+                  <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded pointer-events-none">{day.count} msgs</div>
                   <span className="text-xs text-slate-400 font-medium">{day.label}</span>
                 </div>
               );
@@ -107,12 +92,12 @@ const AnalyticsDashboard = () => {
         {/* Tablas Inferiores */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
-          {/* Top Agentes */}
+          {/* Top Agentes (Productividad) */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-              <UserCheck size={18} className="text-slate-400"/> Top Agentes (Chats Asignados)
+              <UserCheck size={18} className="text-slate-400"/> Productividad Agentes
             </h3>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {data.agents.length > 0 ? data.agents.map((agent: any, i: number) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                   <div className="flex items-center gap-3">
@@ -121,7 +106,22 @@ const AnalyticsDashboard = () => {
                     </div>
                     <span className="font-bold text-sm text-slate-700">{agent.name}</span>
                   </div>
-                  <span className="font-mono font-bold text-slate-500">{agent.count}</span>
+                  
+                  {/* Métricas Agente */}
+                  <div className="flex gap-4 text-right">
+                    <div title="Mensajes Enviados">
+                        <div className="flex items-center justify-end gap-1 text-xs text-slate-400 mb-0.5">
+                            <MessageCircle size={12}/> Msgs
+                        </div>
+                        <span className="font-mono font-bold text-slate-600">{agent.msgCount}</span>
+                    </div>
+                    <div title="Personas Únicas Atendidas">
+                        <div className="flex items-center justify-end gap-1 text-xs text-slate-400 mb-0.5">
+                            <Users size={12}/> Pers
+                        </div>
+                        <span className="font-mono font-bold text-blue-600">{agent.chatCount}</span>
+                    </div>
+                  </div>
                 </div>
               )) : <p className="text-sm text-slate-400 italic">No hay datos suficientes.</p>}
             </div>
@@ -138,10 +138,7 @@ const AnalyticsDashboard = () => {
                       <span>{st.count}</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full ${st.name === 'Nuevo' ? 'bg-green-500' : st.name === 'Abierto' ? 'bg-blue-500' : 'bg-slate-400'}`} 
-                        style={{ width: `${(st.count / data.kpis.totalContacts) * 100}%` }}
-                      ></div>
+                      <div className={`h-full rounded-full ${st.name === 'Nuevo' ? 'bg-green-500' : st.name === 'Abierto' ? 'bg-blue-500' : 'bg-slate-400'}`} style={{ width: `${(st.count / data.kpis.totalContacts) * 100}%` }}></div>
                     </div>
                   </div>
                 ))}

@@ -49,27 +49,27 @@ const onlineUsers = new Map<string, string>();
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 // ==========================================
-//  RUTAS DE ANALÍTICAS (NUEVO)
+//  RUTAS DE ANALÍTICAS (MEJORADA)
 // ==========================================
 
 app.get('/api/analytics', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
     
     try {
-        // 1. Cargar datos crudos (optimizaremos esto en el futuro si crece mucho)
         const contacts = await base('Contacts').select().all();
         const messages = await base('Messages').select().all();
         
-        // 2. Calcular KPIs Generales
+        // 1. KPIs Generales
         const totalContacts = contacts.length;
         const totalMessages = messages.length;
+        // Dato que preguntabas: Cuenta cuántos tienen status 'Nuevo'
         const newLeads = contacts.filter(c => c.get('status') === 'Nuevo').length;
         
-        // 3. Actividad últimos 7 días (Gráfico de Barras)
+        // 2. Actividad (Gráfico)
         const last7Days = [...Array(7)].map((_, i) => {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            return d.toISOString().split('T')[0]; // YYYY-MM-DD
+            return d.toISOString().split('T')[0];
         }).reverse();
 
         const activityData = last7Days.map(date => {
@@ -77,24 +77,43 @@ app.get('/api/analytics', async (req, res) => {
                 const mDate = (m.get('timestamp') as string || "").split('T')[0];
                 return mDate === date;
             }).length;
-            // Formato corto para la gráfica (ej: "12 Oct")
             const label = new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
             return { date, label, count };
         });
 
-        // 4. Rendimiento por Agente (Top 5)
-        const agentMap: Record<string, number> = {};
-        contacts.forEach(c => {
-            const agent = (c.get('assigned_to') as string) || 'Sin Asignar';
-            agentMap[agent] = (agentMap[agent] || 0) + 1;
+        // 3. RENDIMIENTO AGENTES (NUEVA LÓGICA)
+        // Estructura: { "NombreAgente": { msgs: 50, chats: Set(phone1, phone2) } }
+        const agentStats: Record<string, { msgs: number, uniqueChats: Set<string> }> = {};
+
+        messages.forEach(m => {
+            const sender = (m.get('sender') as string) || "";
+            const recipient = (m.get('recipient') as string) || "";
+            
+            // Detectar si es agente: NO es un número de teléfono (contiene letras)
+            // Asumimos que los clientes son números (solo dígitos)
+            const isPhone = /^\d+$/.test(sender.replace(/\D/g, '')); // true si solo tiene números
+            
+            // Si el remitente tiene letras (es un nombre de usuario/agente)
+            if (!isPhone && sender.toLowerCase() !== 'sistema' && sender.trim() !== '') {
+                if (!agentStats[sender]) {
+                    agentStats[sender] = { msgs: 0, uniqueChats: new Set() };
+                }
+                agentStats[sender].msgs += 1;
+                if (recipient) agentStats[sender].uniqueChats.add(recipient);
+            }
         });
 
-        const agentPerformance = Object.entries(agentMap)
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => b.count - a.count)
+        // Convertir a array y ordenar por mensajes enviados
+        const agentPerformance = Object.entries(agentStats)
+            .map(([name, data]) => ({ 
+                name, 
+                msgCount: data.msgs,
+                chatCount: data.uniqueChats.size 
+            }))
+            .sort((a, b) => b.msgCount - a.msgCount)
             .slice(0, 5); // Top 5
 
-        // 5. Distribución por Estado
+        // 4. Distribución por Estado
         const statusMap: Record<string, number> = {};
         contacts.forEach(c => {
             const s = (c.get('status') as string) || 'Otros';

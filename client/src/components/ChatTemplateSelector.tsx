@@ -18,6 +18,7 @@ interface Template {
   language: string;
 }
 
+// ESTA INTERFAZ ES LA CLAVE PARA QUE APP.TSX NO DE ERROR
 interface ChatTemplateSelectorProps {
   isOpen: boolean;
   onClose: () => void;
@@ -52,6 +53,7 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
     try {
       const res = await fetch(`${API_URL_BASE}/templates`);
       const data = await res.json();
+      // Solo mostramos las aprobadas para evitar errores
       const approved = data.filter((t: any) => t.status === 'APPROVED');
       setTemplates(approved);
     } catch (err) {
@@ -70,7 +72,6 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
     setVariableValues(initialVars);
   };
 
-  // --- LÓGICA DE CONSTRUCCIÓN DEL TEXTO ---
   const constructFinalText = (body: string, vars: Record<string, string>) => {
     let text = body;
     Object.keys(vars).forEach(key => {
@@ -83,7 +84,6 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
     if (!selectedTemplate) return;
     setIsSending(true);
 
-    // Preparamos el texto real para que se guarde bonito en la base de datos
     const finalText = constructFinalText(selectedTemplate.body, variableValues);
 
     try {
@@ -92,7 +92,7 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
         language: selectedTemplate.language,
         phone: targetPhone,
         variables: Object.values(variableValues),
-        previewText: finalText // ENVIAMOS EL TEXTO REAL
+        previewText: finalText
       };
 
       const response = await fetch(`${API_URL_BASE}/send-template`, {
