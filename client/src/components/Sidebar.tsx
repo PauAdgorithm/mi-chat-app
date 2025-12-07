@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  Users, 
   Search, 
   RefreshCw, 
   UserCheck, 
@@ -9,7 +8,9 @@ import {
   User, 
   ChevronDown, 
   X, 
-  Hash // <--- Importado para las etiquetas
+  Hash, 
+  CheckCircle,
+  ListFilter
 } from 'lucide-react';
 
 export interface Contact {
@@ -26,10 +27,9 @@ export interface Contact {
   address?: string;
   notes?: string;
   signup_date?: string; 
-  tags?: string[]; // <--- Campo Tags Añadido
+  tags?: string[];
 }
 
-// Interfaces para los desplegables
 interface Agent { id: string; name: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
@@ -43,8 +43,8 @@ interface SidebarProps {
   typingStatus: { [chatId: string]: string };
 }
 
-// Tipos de filtro ampliados
-type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
+// Tipos de vista principal
+type ViewScope = 'all' | 'mine' | 'unassigned';
 
 // Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
@@ -57,12 +57,22 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [searchQuery, setSearchQuery] = useState('');
   
   // ESTADOS DE FILTRO
-  const [filter, setFilter] = useState<FilterType>('all');
-  const [filterValue, setFilterValue] = useState<string>(''); 
+  const [viewScope, setViewScope] = useState<ViewScope>('all'); // Pestaña principal
+  const [showFilters, setShowFilters] = useState(false); // Mostrar panel de filtros
+  
+  // Filtros Avanzados Seleccionados
+  const [activeFilters, setActiveFilters] = useState({
+      department: '',
+      status: '',
+      tag: '',
+      agent: ''
+  });
   
   // DATOS PARA LISTAS DESPLEGABLES
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
   const [availableDepts, setAvailableDepts] = useState<string[]>([]);
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
 
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -104,9 +114,11 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     const handleAgentsList = (list: Agent[]) => setAvailableAgents(list);
     
+    // Aquí procesamos TODAS las configuraciones (Deptos, Estados, Tags)
     const handleConfigList = (list: ConfigItem[]) => {
-        const depts = list.filter(i => i.type === 'Department').map(i => i.name);
-        setAvailableDepts(depts);
+        setAvailableDepts(list.filter(i => i.type === 'Department').map(i => i.name));
+        setAvailableStatuses(list.filter(i => i.type === 'Status').map(i => i.name));
+        setAvailableTags(list.filter(i => i.type === 'Tag').map(i => i.name));
     };
 
     // --- LISTENERS ---
@@ -160,27 +172,39 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
+  // --- LÓGICA DE FILTRADO COMBINADO ---
   const filteredContacts = contacts.filter(c => {
+      // 1. Buscador (Texto)
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      if (filter === 'all') return true;
-      if (filter === 'mine') return c.assigned_to === user.username;
-      if (filter === 'unassigned') return !c.assigned_to;
+      // 2. Vista Principal (Tabs)
+      if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
+      if (viewScope === 'unassigned' && c.assigned_to) return false;
+
+      // 3. Filtros Avanzados (Dropdowns)
+      if (activeFilters.department && c.department !== activeFilters.department) return false;
+      if (activeFilters.status && c.status !== activeFilters.status) return false;
+      if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
       
-      if (filter === 'agent') return c.assigned_to === filterValue;
-      if (filter === 'department') return c.department === filterValue;
+      // Filtrado por Etiquetas (si tiene la etiqueta seleccionada)
+      if (activeFilters.tag) {
+          if (!c.tags || !c.tags.includes(activeFilters.tag)) return false;
+      }
 
       return true;
   });
 
-  const handleFilterClick = (type: FilterType) => {
-      if (filter === type && (type === 'all' || type === 'mine' || type === 'unassigned')) return; 
-      setFilter(type);
-      if (type === 'all' || type === 'mine' || type === 'unassigned') setFilterValue('');
-      if (type === 'agent' && availableAgents.length > 0) setFilterValue(availableAgents[0].name);
-      if (type === 'department' && availableDepts.length > 0) setFilterValue(availableDepts[0]);
+  const updateFilter = (key: keyof typeof activeFilters, value: string) => {
+      setActiveFilters(prev => ({ ...prev, [key]: value }));
   };
+
+  const clearFilters = () => {
+      setActiveFilters({ department: '', status: '', tag: '', agent: '' });
+      setShowFilters(false);
+  };
+
+  const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
@@ -192,45 +216,73 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
         </h2>
         
+        {/* BUSCADOR */}
         <div className="relative mb-3">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
 
-        {/* BOTONES DE FILTRO */}
-        <div className="flex gap-2 pb-1 overflow-x-auto no-scrollbar">
-            <button onClick={() => handleFilterClick('all')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Todos</button>
-            <button onClick={() => handleFilterClick('mine')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center gap-1 ${filter === 'mine' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}><UserCheck className="w-3 h-3" /> Míos</button>
-            <button onClick={() => handleFilterClick('unassigned')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all ${filter === 'unassigned' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Libres</button>
+        {/* TABS Y BOTÓN DE FILTROS */}
+        <div className="flex gap-2 items-center">
+            <div className="flex bg-slate-100 p-1 rounded-lg flex-1">
+                <button onClick={() => setViewScope('all')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
+                <button onClick={() => setViewScope('mine')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Míos</button>
+                <button onClick={() => setViewScope('unassigned')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'unassigned' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Libres</button>
+            </div>
             
-            <button onClick={() => handleFilterClick('agent')} className={`flex-shrink-0 px-2 py-1.5 rounded-lg transition-all ${filter === 'agent' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} title="Por Agente">
-                <User className="w-4 h-4" />
-            </button>
-            <button onClick={() => handleFilterClick('department')} className={`flex-shrink-0 px-2 py-1.5 rounded-lg transition-all ${filter === 'department' ? 'bg-pink-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} title="Por Departamento">
-                <Briefcase className="w-4 h-4" />
+            <button 
+                onClick={() => setShowFilters(!showFilters)} 
+                className={`p-2 rounded-lg transition-all border ${showFilters || hasActiveFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
+                title="Filtros Avanzados"
+            >
+                {hasActiveFilters ? <Filter className="w-4 h-4 fill-current" /> : <ListFilter className="w-4 h-4" />}
             </button>
         </div>
 
-        {/* SELECTOR SECUNDARIO */}
-        {(filter === 'agent' || filter === 'department') && (
-            <div className="mt-3 animate-in slide-in-from-top-2 fade-in duration-200">
-                <div className="relative">
-                    <select 
-                        value={filterValue} 
-                        onChange={(e) => setFilterValue(e.target.value)} 
-                        className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border-none focus:ring-0 cursor-pointer ${filter === 'agent' ? 'bg-purple-50 text-purple-700' : 'bg-pink-50 text-pink-700'}`}
-                    >
-                        {filter === 'agent' ? (
-                            availableAgents.length > 0 ? availableAgents.map(a => <option key={a.id} value={a.name}>{a.name}</option>) : <option>Sin Agentes</option>
-                        ) : (
-                            availableDepts.length > 0 ? availableDepts.map(d => <option key={d} value={d}>{d}</option>) : <option>Sin Dptos</option>
-                        )}
-                    </select>
-                    <ChevronDown className={`absolute right-2 top-2.5 w-4 h-4 ${filter === 'agent' ? 'text-purple-400' : 'text-pink-400'}`} />
-                    
-                    <button onClick={() => setFilter('all')} className="absolute -right-2 -top-8 bg-slate-200 rounded-full p-1 text-slate-500 hover:bg-slate-300 md:hidden">
-                        <X className="w-3 h-3"/>
-                    </button>
+        {/* PANEL DE FILTROS AVANZADOS (DESPLEGABLE) */}
+        {showFilters && (
+            <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 animate-in slide-in-from-top-2 fade-in duration-200">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Filtrar por:</span>
+                    {hasActiveFilters && <button onClick={() => setActiveFilters({ department: '', status: '', tag: '', agent: '' })} className="text-[10px] text-red-500 hover:underline">Borrar filtros</button>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                    {/* Depto */}
+                    <div className="relative">
+                        <select value={activeFilters.department} onChange={(e) => updateFilter('department', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="">Departamento</option>
+                            {availableDepts.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <Briefcase className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
+                    </div>
+
+                    {/* Estado */}
+                    <div className="relative">
+                        <select value={activeFilters.status} onChange={(e) => updateFilter('status', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="">Estado</option>
+                            {availableStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        <CheckCircle className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
+                    </div>
+
+                    {/* Etiqueta */}
+                    <div className="relative">
+                        <select value={activeFilters.tag} onChange={(e) => updateFilter('tag', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="">Etiqueta</option>
+                            {availableTags.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <Hash className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
+                    </div>
+
+                    {/* Agente */}
+                    <div className="relative">
+                        <select value={activeFilters.agent} onChange={(e) => updateFilter('agent', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="">Agente</option>
+                            {availableAgents.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+                        </select>
+                        <User className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
+                    </div>
                 </div>
             </div>
         )}
@@ -240,9 +292,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
-                    {filter === 'agent' || filter === 'department' ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
+                    {hasActiveFilters ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
                 </div>
-                <p>{isConnected ? (filter === 'all' ? "Cargando chats..." : "No hay chats con este filtro") : "Esperando conexión..."}</p>
+                <p>{isConnected ? (hasActiveFilters ? "No hay chats con estos filtros" : "Cargando chats...") : "Esperando conexión..."}</p>
             </div>
         ) : (
           <ul className="divide-y divide-gray-100">
@@ -253,17 +305,17 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
               return (
                 <li key={contact.id || Math.random()}>
-                  <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${selectedContactId === contact.id ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
+                  <button onClick={() => onSelectContact(contact)} className={`w-full flex items-start gap-3 p-4 transition-all hover:bg-white text-left group ${isSelected ? 'bg-white border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'}`}>
                     
                     <div className="relative">
-                        <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${selectedContactId === contact.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (selectedContactId === contact.id ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
+                        <div className={`h-10 w-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-transform group-hover:scale-105 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!contact.avatar ? (isSelected ? 'bg-blue-500' : 'bg-slate-400') : ''}`}>
                           {contact.avatar ? <img src={contact.avatar} alt="Avatar" className="w-full h-full object-cover" /> : getInitial(contact.name, contact.phone)}
                         </div>
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-1">
-                          <span className={`text-sm font-bold truncate ${selectedContactId === contact.id ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span>
+                          <span className={`text-sm font-bold truncate ${isSelected ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span>
                           <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span>
                       </div>
                       
@@ -282,7 +334,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                       <div className="flex gap-1 mt-2 flex-wrap items-center">
                           {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
                           
-                          {/* --- AQUI SE MUESTRAN LAS ETIQUETAS (TAGS) --- */}
+                          {/* TAGS EN LA LISTA */}
                           {contact.tags && contact.tags.slice(0, 2).map(tag => (
                               <span key={tag} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-700 border border-orange-100">
                                 <Hash size={8} /> {tag}
