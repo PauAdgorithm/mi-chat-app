@@ -18,14 +18,15 @@ interface Template {
   language: string;
 }
 
-// ESTA INTERFAZ ES LA CLAVE PARA QUE APP.TSX NO DE ERROR
+// CORRECCIÓN: Añadido senderName a la interfaz
 interface ChatTemplateSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   targetPhone: string;
+  senderName: string; // <--- ¡AQUÍ ESTABA EL ERROR!
 }
 
-const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onClose, targetPhone }) => {
+const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onClose, targetPhone, senderName }) => {
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL_BASE = isProduction
     ? 'https://chatgorithm.onrender.com/api' 
@@ -53,7 +54,6 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
     try {
       const res = await fetch(`${API_URL_BASE}/templates`);
       const data = await res.json();
-      // Solo mostramos las aprobadas para evitar errores
       const approved = data.filter((t: any) => t.status === 'APPROVED');
       setTemplates(approved);
     } catch (err) {
@@ -92,7 +92,8 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
         language: selectedTemplate.language,
         phone: targetPhone,
         variables: Object.values(variableValues),
-        previewText: finalText
+        previewText: finalText,
+        senderName: senderName // <--- Usamos el nombre real del agente
       };
 
       const response = await fetch(`${API_URL_BASE}/send-template`, {

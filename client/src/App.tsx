@@ -37,7 +37,11 @@ function App() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [isConnected, setIsConnected] = useState(true);
+  
+  // --- ESTADO PARA EL MODAL DE PLANTILLAS ---
   const [showTemplates, setShowTemplates] = useState(false);
+
+  // --- ESTADOS GLOBALES NUEVOS ---
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); 
 
@@ -56,12 +60,17 @@ function App() {
 
     const onConnect = () => { 
         setIsConnected(true); 
+        console.log("🟢 Conectado/Reconectado");
         if (user) socket.emit('register_presence', user.username); 
         socket.emit('request_config');
-        socket.emit('request_quick_replies'); // <--- Cargar respuestas al conectar
+        socket.emit('request_quick_replies'); 
     };
     
-    const onDisconnect = () => setIsConnected(false);
+    const onDisconnect = () => {
+        setIsConnected(false);
+        console.log("🔴 Desconectado");
+    };
+
     const onOnlineUsersUpdate = (users: string[]) => setOnlineUsers(users);
     const onRemoteTyping = (data: { user: string, phone: string }) => {
         if (data.user !== user?.username) {
@@ -86,13 +95,12 @@ function App() {
         });
     });
 
-    // LISTENER RESPUESTAS RÁPIDAS
     socket.on('quick_replies_list', (list: QuickReply[]) => {
         setQuickReplies(list);
     });
 
     socket.emit('request_config');
-    socket.emit('request_quick_replies'); // Petición inicial
+    socket.emit('request_quick_replies');
 
     const connectionCheckTimeout = setTimeout(() => setIsConnected(socket.connected), 1500);
 
@@ -111,7 +119,7 @@ function App() {
   const handleLogout = () => { localStorage.removeItem('chatgorithm_user'); sessionStorage.removeItem('chatgorithm_user'); setUser(null); setSelectedContact(null); socket.disconnect(); socket.connect(); };
 
   if (!user) return <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900"><div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50"><Login onLogin={handleLogin} socket={socket} /></div></div>;
-  if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} quickReplies={quickReplies} />; // Pasamos quickReplies a Settings
+  if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} quickReplies={quickReplies} />;
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -134,13 +142,20 @@ function App() {
                     onlineUsers={onlineUsers} 
                     typingInfo={typingStatus} 
                     onOpenTemplates={() => setShowTemplates(true)}
-                    quickReplies={quickReplies} // <--- Pasamos las respuestas rápidas
+                    quickReplies={quickReplies}
                 /> 
               ) : ( <div className="flex flex-col items-center justify-center h-full text-slate-300"><MessageCircle className="w-16 h-16 mb-4 opacity-50" /><p>Selecciona un chat</p></div> )}
             </div>
           </main>
         </div>
-        <ChatTemplateSelector isOpen={showTemplates} onClose={() => setShowTemplates(false)} targetPhone={selectedContact?.phone || ""} />
+        
+        
+        <ChatTemplateSelector 
+            isOpen={showTemplates} 
+            onClose={() => setShowTemplates(false)} 
+            targetPhone={selectedContact?.phone || ""}
+            senderName={user.username} 
+        />
     </div>
   );
 }
