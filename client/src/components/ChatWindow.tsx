@@ -4,11 +4,11 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap // <--- Zap Importado
+  LayoutTemplate, Tag, Zap 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
-import { QuickReply } from '../App'; // Importar interfaz
+import { QuickReply } from '../App'; 
 
 interface ChatWindowProps {
   socket: any;
@@ -19,7 +19,7 @@ interface ChatWindowProps {
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
   onOpenTemplates: () => void;
-  quickReplies: QuickReply[]; // <--- Recibimos las respuestas
+  quickReplies?: QuickReply[]; // Hacemos opcional para evitar errores si no llega
 }
 
 interface Message {
@@ -57,7 +57,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   return ( <div className={`flex items-start gap-2 p-2 rounded-xl w-full max-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}> <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" /> <button onClick={togglePlay} className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 mt-0.5 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}> {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />} </button> <div className="flex-1 flex flex-col gap-1 w-full min-w-0"> <div className="h-5 flex items-center"><input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`} /></div> <div className="flex justify-between items-center text-[10px] font-medium text-slate-500 h-5 w-full"> <span className="font-mono tabular-nums min-w-[35px]">{currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}</span> <div className="flex items-center gap-2"> <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 rounded text-[9px] font-bold min-w-[22px] text-center">{playbackRate}x</button> <div className="relative flex items-center group hidden sm:flex" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}> <button onClick={toggleMute} className="p-1 hover:text-slate-800"><Volume2 className="w-3.5 h-3.5" /></button> {showVolumeSlider && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 z-20"><div className="h-16 w-4 flex items-center justify-center"><input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div></div>} </div> <a href={src} download="audio.webm" target="_blank" rel="noreferrer" className="p-1 hover:bg-black/5 rounded-full"><Download className="w-3.5 h-3.5" /></a> </div> </div> </div> </div> );
 };
 
-export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates, quickReplies }: ChatWindowProps) {
+export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates, quickReplies = [] }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -84,13 +84,15 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isInternalMode, setIsInternalMode] = useState(false); 
   const [isSaving, setIsSaving] = useState(false);
   
-  // ESTADO NUEVO: Mostrar lista de respuestas rápidas
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
 
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
+
+  // DETECTAR SHORTCUT ACTIVO (PREVISUALIZACIÓN)
+  const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
 
   const typingUser = typingInfo[contact.phone] || null;
   const isOnline = onlineUsers.some(u => {
@@ -138,7 +140,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowTagMenu(false); 
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
-    setShowQuickRepliesList(false); // Reset al cambiar chat
+    setShowQuickRepliesList(false);
 
     setShowSearch(false);
     setChatSearchQuery('');
@@ -164,7 +166,29 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
-  const sendMessage = (e: React.FormEvent) => { e.preventDefault(); if (input.trim()) { const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); } };
+  
+  // --- FUNCIÓN DE ENVÍO MODIFICADA PARA EXPANDIR ATAJOS ---
+  const sendMessage = (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    
+    // Verificar si el input actual es un atajo y sustituirlo por el contenido
+    const finalInput = matchingQR ? matchingQR.content : input;
+
+    if (finalInput.trim()) { 
+        const msg = { 
+            text: finalInput, // Enviamos el texto expandido
+            sender: user.username, 
+            targetPhone: contact.phone, 
+            timestamp: new Date().toISOString(), 
+            type: isInternalMode ? 'note' : 'text' 
+        }; 
+        socket.emit('chatMessage', msg); 
+        setInput(''); 
+        setShowEmojiPicker(false); 
+        setIsInternalMode(false); 
+    } 
+  };
+  
   const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
   const toggleTag = (tag: string) => { let newTags = [...contactTags]; if (newTags.includes(tag)) { newTags = newTags.filter(t => t !== tag); } else { newTags.push(tag); } setContactTags(newTags); updateCRM('tags', newTags); };
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
@@ -295,6 +319,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
           
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'}`}>
+            
+            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
+            {matchingQR && (
+                <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
+                    <Zap className="w-4 h-4 fill-current" />
+                    <span className="font-bold">Atajo detectado:</span>
+                    <span className="truncate flex-1 italic font-medium">{matchingQR.content}</span>
+                    <span className="text-[10px] opacity-70 whitespace-nowrap">(Se enviará este texto)</span>
+                </div>
+            )}
+
             <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
@@ -302,7 +337,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
               {/* BOTÓN PLANTILLAS */}
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
 
-              {/* --- BOTÓN RESPUESTAS RÁPIDAS (NUEVO) --- */}
+              {/* BOTÓN RESPUESTAS RÁPIDAS */}
               <div className="relative">
                   <button type="button" onClick={() => setShowQuickRepliesList(!showQuickRepliesList)} className="p-2 rounded-full text-slate-500 hover:text-yellow-600 hover:bg-yellow-50 transition" title="Respuestas Rápidas"><Zap className="w-5 h-5" /></button>
                   {showQuickRepliesList && (
@@ -313,6 +348,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                                   <button key={qr.id} onClick={() => insertQuickReply(qr.content)} className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-50 transition-colors group">
                                       <div className="font-bold text-slate-700">{qr.title}</div>
                                       <div className="text-[10px] text-slate-500 truncate group-hover:text-slate-600">{qr.content}</div>
+                                      {qr.shortcut && <div className="text-[9px] text-yellow-600 font-mono mt-0.5">{qr.shortcut}</div>}
                                   </button>
                               )) : <div className="text-xs text-slate-400 italic px-2">No hay respuestas configuradas.</div>}
                           </div>
