@@ -52,7 +52,6 @@ const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 //  RUTAS DE PLANTILLAS (CRUD + ENVÍO)
 // ==========================================
 
-// 1. OBTENER PLANTILLAS
 app.get('/api/templates', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
     try {
@@ -76,7 +75,6 @@ app.get('/api/templates', async (req, res) => {
     }
 });
 
-// 2. CREAR PLANTILLA (Y REGISTRAR EN META)
 app.post('/api/create-template', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
 
@@ -86,7 +84,6 @@ app.post('/api/create-template', async (req, res) => {
         let metaId = "meta_simulado_" + Date.now();
         let status = "PENDING";
 
-        // Envío real a Meta si tenemos credenciales
         if (waToken && waBusinessId) {
             try {
                 console.log("📤 Enviando plantilla a Meta API...");
@@ -132,13 +129,11 @@ app.post('/api/create-template', async (req, res) => {
     }
 });
 
-// 3. ELIMINAR PLANTILLA
 app.delete('/api/delete-template/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "Airtable no conectado" });
-    const { id } = req.params;
     try {
-        await base(TABLE_TEMPLATES).destroy([id]);
-        console.log("🗑️ Plantilla eliminada de Airtable:", id);
+        await base(TABLE_TEMPLATES).destroy([req.params.id]);
+        console.log("🗑️ Plantilla eliminada de Airtable:", req.params.id);
         res.json({ success: true });
     } catch (error: any) {
         console.error("❌ Error eliminando:", error);
@@ -146,13 +141,11 @@ app.delete('/api/delete-template/:id', async (req, res) => {
     }
 });
 
-// 4. ENVIAR PLANTILLA
 app.post('/api/send-template', async (req, res) => {
     if (!waToken || !waPhoneId) return res.status(500).json({ error: "Faltan credenciales de WhatsApp" });
 
     try {
         const { templateName, language, phone, variables, previewText } = req.body;
-        
         const parameters = variables.map((val: string) => ({ type: "text", text: val }));
 
         const payload = {
@@ -174,7 +167,6 @@ app.post('/api/send-template', async (req, res) => {
             { headers: { Authorization: `Bearer ${waToken}` } }
         );
 
-        // Guardar el TEXTO REAL en el chat
         const finalMessage = previewText || `📝 [Plantilla] ${templateName}`;
         
         await saveAndEmitMessage({ 
@@ -261,7 +253,6 @@ app.post('/webhook', async (req, res) => {
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type, mediaId });
     }
     
-    // ACTUALIZACIÓN DE ESTADO DE PLANTILLAS
     if (body.object && body.entry?.[0]?.changes?.[0]?.field === 'message_template_status_update') {
         const event = body.entry[0].changes[0].value;
         const metaId = event.message_template_id;
@@ -306,12 +297,7 @@ async function saveAndEmitMessage(msg: any) {
   }
 }
 
-// ==========================================
-//  SOCKET.IO LOGIC
-// ==========================================
-
 io.on('connection', (socket) => {
-  // CONFIG: Ahora carga y gestiona TAGS también
   socket.on('request_config', async () => { 
       if (base) { 
           try {
@@ -354,157 +340,66 @@ io.on('connection', (socket) => {
       }
   });
 
-  socket.on('request_agents', async () => {
+  // --- NUEVO: GESTIÓN DE RESPUESTAS RÁPIDAS (SNIPPETS) ---
+  socket.on('request_quick_replies', async () => {
     if (base) {
         try {
-            const records = await base('Agents').select().all();
-            socket.emit('agents_list', records.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') })));
-        } catch (e) { console.error(e); }
+            const records = await base('QuickReplies').select().all();
+            socket.emit('quick_replies_list', records.map(r => ({
+                id: r.id,
+                title: r.get('Title'),
+                content: r.get('Content'),
+                shortcut: r.get('Shortcut')
+            })));
+        } catch(e) { console.error("Error QuickReplies:", e); }
     }
   });
 
-  socket.on('login_attempt', async (data) => { 
-      if(!base) return;
-      try {
-          const records = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage();
-          if (records.length > 0) {
-              const dbPassword = records[0].get('password');
-              if (!dbPassword || String(dbPassword).trim() === "") { socket.emit('login_success', { username: records[0].get('name'), role: records[0].get('role') }); } 
-              else { if (String(dbPassword) === String(data.password)) { socket.emit('login_success', { username: records[0].get('name'), role: records[0].get('role') }); } else { socket.emit('login_error', 'Contraseña incorrecta'); } }
-          } else { socket.emit('login_error', 'Usuario no encontrado'); }
-      } catch (e) { socket.emit('login_error', 'Error servidor'); }
+  socket.on('add_quick_reply', async (data) => {
+    if (base) {
+        try {
+            await base('QuickReplies').create([{ fields: { "Title": data.title, "Content": data.content, "Shortcut": data.shortcut } }]);
+            const records = await base('QuickReplies').select().all();
+            io.emit('quick_replies_list', records.map(r => ({ id: r.id, title: r.get('Title'), content: r.get('Content'), shortcut: r.get('Shortcut') })));
+            socket.emit('action_success', 'Respuesta rápida creada');
+        } catch(e) { socket.emit('action_error', 'Error creando respuesta'); }
+    }
   });
 
-  socket.on('create_agent', async (data) => {
-      if (!base) return;
-      const { newAgent } = data; 
-      try {
-          await base('Agents').create([{ fields: { "name": newAgent.name, "role": newAgent.role, "password": newAgent.password || "" } }]);
-          const updatedRecords = await base('Agents').select().all();
-          io.emit('agents_list', updatedRecords.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') })));
-          socket.emit('action_success', 'Perfil creado');
-      } catch (e) { console.error("Error creating:", e); socket.emit('action_error', 'Error creando perfil'); }
+  socket.on('delete_quick_reply', async (id) => {
+    if (base) {
+        try {
+            await base('QuickReplies').destroy([id]);
+            const records = await base('QuickReplies').select().all();
+            io.emit('quick_replies_list', records.map(r => ({ id: r.id, title: r.get('Title'), content: r.get('Content'), shortcut: r.get('Shortcut') })));
+            socket.emit('action_success', 'Respuesta eliminada');
+        } catch(e) { socket.emit('action_error', 'Error eliminando'); }
+    }
   });
 
-  socket.on('delete_agent', async (data) => {
-      if (!base) return;
-      const { agentId } = data;
-      try {
-          await base('Agents').destroy([agentId]);
-          const updated = await base('Agents').select().all();
-          io.emit('agents_list', updated.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') })));
-          socket.emit('action_success', 'Perfil eliminado');
-      } catch (e) { console.error(e); }
+  socket.on('update_quick_reply', async (data) => {
+    if (base) {
+        try {
+            await base('QuickReplies').update([{ id: data.id, fields: { "Title": data.title, "Content": data.content, "Shortcut": data.shortcut } }]);
+            const records = await base('QuickReplies').select().all();
+            io.emit('quick_replies_list', records.map(r => ({ id: r.id, title: r.get('Title'), content: r.get('Content'), shortcut: r.get('Shortcut') })));
+            socket.emit('action_success', 'Respuesta actualizada');
+        } catch(e) { socket.emit('action_error', 'Error actualizando'); }
+    }
   });
 
-  socket.on('update_agent', async (data) => {
-      if (!base) return;
-      try {
-          const fields: any = { "name": data.updates.name, "role": data.updates.role };
-          if (data.updates.password !== undefined) fields["password"] = data.updates.password;
-          await base('Agents').update([{ id: data.agentId, fields: fields }]);
-          const updated = await base('Agents').select().all();
-          io.emit('agents_list', updated.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') })));
-          socket.emit('action_success', 'Perfil actualizado');
-      } catch (e) { console.error(e); socket.emit('action_error', 'Error al actualizar'); }
-  });
-
-  // --- CONTACTOS AHORA CON TAGS ---
-  socket.on('request_contacts', async () => { 
-      if (base) { 
-          try { 
-              const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); 
-              socket.emit('contacts_update', records.map(r => ({ 
-                  id: r.id, 
-                  phone: (r.get('phone') as string) || "", 
-                  name: (r.get('name') as string) || "Desconocido", 
-                  status: (r.get('status') as string) || "Nuevo", 
-                  department: (r.get('department') as string) || "", 
-                  assigned_to: (r.get('assigned_to') as string) || "", 
-                  last_message: r.get('last_message'), 
-                  last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), 
-                  avatar: (r.get('avatar') as any[])?.[0]?.url, 
-                  email: (r.get('email') as string) || "", 
-                  address: (r.get('address') as string) || "", 
-                  notes: (r.get('notes') as string) || "", 
-                  signup_date: (r.get('signup_date') as string) || "",
-                  tags: (r.get('tags') as string[]) || [] // <-- TAGS
-              }))); 
-          } catch (e) { console.error("Error contacts:", e); } 
-      } 
-  });
-  
+  socket.on('request_agents', async () => { if (base) { try { const records = await base('Agents').select().all(); socket.emit('agents_list', records.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') }))); } catch (e) { console.error(e); } } });
+  socket.on('login_attempt', async (data) => { if(!base) return; try { const records = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { const dbPassword = records[0].get('password'); if (!dbPassword || String(dbPassword).trim() === "") { socket.emit('login_success', { username: records[0].get('name'), role: records[0].get('role') }); } else { if (String(dbPassword) === String(data.password)) { socket.emit('login_success', { username: records[0].get('name'), role: records[0].get('role') }); } else { socket.emit('login_error', 'Contraseña incorrecta'); } } } else { socket.emit('login_error', 'Usuario no encontrado'); } } catch (e) { socket.emit('login_error', 'Error servidor'); } });
+  socket.on('create_agent', async (data) => { if (!base) return; const { newAgent } = data; try { await base('Agents').create([{ fields: { "name": newAgent.name, "role": newAgent.role, "password": newAgent.password || "" } }]); const updatedRecords = await base('Agents').select().all(); io.emit('agents_list', updatedRecords.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') }))); socket.emit('action_success', 'Perfil creado'); } catch (e) { console.error("Error creating:", e); socket.emit('action_error', 'Error creando perfil'); } });
+  socket.on('delete_agent', async (data) => { if (!base) return; const { agentId } = data; try { await base('Agents').destroy([agentId]); const updated = await base('Agents').select().all(); io.emit('agents_list', updated.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') }))); socket.emit('action_success', 'Perfil eliminado'); } catch (e) { console.error(e); } });
+  socket.on('update_agent', async (data) => { if (!base) return; try { const fields: any = { "name": data.updates.name, "role": data.updates.role }; if (data.updates.password !== undefined) fields["password"] = data.updates.password; await base('Agents').update([{ id: data.agentId, fields: fields }]); const updated = await base('Agents').select().all(); io.emit('agents_list', updated.map(r => ({ id: r.id, name: r.get('name'), role: r.get('role'), hasPassword: !!r.get('password') }))); socket.emit('action_success', 'Perfil actualizado'); } catch (e) { console.error(e); socket.emit('action_error', 'Error al actualizar'); } });
+  socket.on('request_contacts', async () => { if (base) { try { const records = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', records.map(r => { const avatarField = r.get('avatar') as any[]; let rawMsg = r.get('last_message'); let cleanMsg = ""; if (typeof rawMsg === 'string') cleanMsg = rawMsg; else if (Array.isArray(rawMsg) && rawMsg.length > 0) cleanMsg = String(rawMsg[0]); else if (rawMsg) cleanMsg = String(rawMsg); return { id: r.id, phone: (r.get('phone') as string) || "", name: (r.get('name') as string) || (r.get('phone') as string) || "Desconocido", status: (r.get('status') as string) || "Nuevo", department: (r.get('department') as string) || "", assigned_to: (r.get('assigned_to') as string) || "", last_message: cleanMsg, last_message_time: (r.get('last_message_time') as string) || new Date().toISOString(), avatar: (avatarField && avatarField.length > 0) ? avatarField[0].url : null, email: (r.get('email') as string) || "", address: (r.get('address') as string) || "", notes: (r.get('notes') as string) || "", signup_date: (r.get('signup_date') as string) || "", tags: (r.get('tags') as string[]) || [] }; })); } catch (e) { console.error("Error contacts:", e); } } });
   socket.on('request_conversation', async (phone) => { if (base) { const cleanPhone = cleanNumber(phone); const records = await base('Messages').select({ filterByFormula: `OR({sender} = '${cleanPhone}', {recipient} = '${cleanPhone}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', records.map(r => ({ text: (r.get('text') as string) || "", sender: (r.get('sender') as string) || "", timestamp: (r.get('timestamp') as string) || "", type: (r.get('type') as string) || "text", mediaId: (r.get('media_id') as string) || "" }))); } });
-  
-  socket.on('update_contact_info', async (data) => { 
-      if(base) { 
-          const cleanPhone = cleanNumber(data.phone); 
-          console.log(`📝 Actualizando CRM para ${cleanPhone}:`, data.updates); 
-          const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); 
-          if (records.length > 0) { 
-              await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); 
-              io.emit('contact_updated_notification'); 
-          } 
-      } 
-  });
-  
-  socket.on('chatMessage', async (msg) => { 
-      const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); 
-      
-      if (waToken && waPhoneId) { 
-          try { 
-              if (msg.type !== 'note') {
-                  await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { 
-                      messaging_product: "whatsapp", 
-                      to: targetPhone, 
-                      type: "text", 
-                      text: { body: msg.text } 
-                  }, { headers: { Authorization: `Bearer ${waToken}` } }); 
-              } else {
-                  console.log("📝 Nota interna guardada (No enviada a WhatsApp):", msg.text);
-              }
-
-              await saveAndEmitMessage({ 
-                  text: msg.text, 
-                  sender: msg.sender, 
-                  recipient: targetPhone, 
-                  timestamp: new Date().toISOString(), 
-                  type: msg.type || 'text' 
-              }); 
-              
-              const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`;
-              await handleContactUpdate(targetPhone, previewText); 
-
-          } catch (error: any) { 
-              console.error("Error envío:", error.message); 
-          } 
-      } 
-  });
-
-  socket.on('register_presence', (username: string) => {
-    if (username) {
-      onlineUsers.set(socket.id, username);
-      console.log(`🟢 Usuario online: ${username} (ID: ${socket.id})`);
-      const uniqueUsers = Array.from(new Set(onlineUsers.values()));
-      io.emit('online_users_update', uniqueUsers);
-    }
-  });
-
-  socket.on('disconnect', () => {
-    if (onlineUsers.has(socket.id)) {
-      const leaver = onlineUsers.get(socket.id);
-      onlineUsers.delete(socket.id);
-      console.log(`🔴 Usuario offline: ${leaver} (ID: ${socket.id})`);
-      const uniqueUsers = Array.from(new Set(onlineUsers.values()));
-      io.emit('online_users_update', uniqueUsers);
-    }
-  });
-
-  socket.on('typing', (data) => {
-    console.log(`🔔 [SERVER] Recibido evento typing de usuario: ${data.user} para el chat: ${data.phone}`); 
-    socket.broadcast.emit('remote_typing', data);
-    console.log("📡 [SERVER] Retransmitido remote_typing a todos");
-  });
+  socket.on('update_contact_info', async (data) => { if(base) { const cleanPhone = cleanNumber(data.phone); console.log(`📝 Actualizando CRM para ${cleanPhone}:`, data.updates); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanPhone}'`, maxRecords: 1 }).firstPage(); if (records.length > 0) { await base('Contacts').update([{ id: records[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
+  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
+  socket.on('register_presence', (username: string) => { if (username) { onlineUsers.set(socket.id, username); console.log(`🟢 Usuario online: ${username} (ID: ${socket.id})`); const uniqueUsers = Array.from(new Set(onlineUsers.values())); io.emit('online_users_update', uniqueUsers); } });
+  socket.on('disconnect', () => { if (onlineUsers.has(socket.id)) { const leaver = onlineUsers.get(socket.id); onlineUsers.delete(socket.id); console.log(`🔴 Usuario offline: ${leaver} (ID: ${socket.id})`); const uniqueUsers = Array.from(new Set(onlineUsers.values())); io.emit('online_users_update', uniqueUsers); } });
+  socket.on('typing', (data) => { console.log(`🔔 [SERVER] Recibido evento typing de usuario: ${data.user} para el chat: ${data.phone}`); socket.broadcast.emit('remote_typing', data); });
 });
 
 httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo en puerto ${PORT}`); });

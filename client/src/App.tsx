@@ -24,6 +24,14 @@ const getSavedUser = () => {
     return null;
 };
 
+// Interface para respuestas rápidas
+export interface QuickReply {
+    id: string;
+    title: string;
+    content: string;
+    shortcut: string;
+}
+
 function App() {
   const [user, setUser] = useState<{username: string, role: string} | null>(getSavedUser);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -38,12 +46,21 @@ function App() {
       statuses: [],
       tags: [] 
   });
+  
+  // ESTADO NUEVO: Respuestas Rápidas
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission !== 'granted') Notification.requestPermission();
     if (user) socket.emit('register_presence', user.username);
 
-    const onConnect = () => { setIsConnected(true); if (user) socket.emit('register_presence', user.username); socket.emit('request_config'); };
+    const onConnect = () => { 
+        setIsConnected(true); 
+        if (user) socket.emit('register_presence', user.username); 
+        socket.emit('request_config');
+        socket.emit('request_quick_replies'); // <--- Cargar respuestas al conectar
+    };
+    
     const onDisconnect = () => setIsConnected(false);
     const onOnlineUsersUpdate = (users: string[]) => setOnlineUsers(users);
     const onRemoteTyping = (data: { user: string, phone: string }) => {
@@ -69,17 +86,32 @@ function App() {
         });
     });
 
+    // LISTENER RESPUESTAS RÁPIDAS
+    socket.on('quick_replies_list', (list: QuickReply[]) => {
+        setQuickReplies(list);
+    });
+
     socket.emit('request_config');
+    socket.emit('request_quick_replies'); // Petición inicial
+
     const connectionCheckTimeout = setTimeout(() => setIsConnected(socket.connected), 1500);
 
-    return () => { socket.off('connect'); socket.off('disconnect'); socket.off('config_list'); socket.off('online_users_update'); socket.off('remote_typing'); clearTimeout(connectionCheckTimeout); };
+    return () => { 
+        socket.off('connect'); 
+        socket.off('disconnect'); 
+        socket.off('config_list'); 
+        socket.off('online_users_update'); 
+        socket.off('remote_typing'); 
+        socket.off('quick_replies_list');
+        clearTimeout(connectionCheckTimeout); 
+    };
   }, [user]); 
 
   const handleLogin = (username: string, role: string, password: string, remember: boolean) => { const u = { username, role }; setUser(u); const d = JSON.stringify(u); if (remember) { localStorage.setItem('chatgorithm_user', d); sessionStorage.removeItem('chatgorithm_user'); } else { sessionStorage.setItem('chatgorithm_user', d); localStorage.removeItem('chatgorithm_user'); } socket.emit('register_presence', username); };
   const handleLogout = () => { localStorage.removeItem('chatgorithm_user'); sessionStorage.removeItem('chatgorithm_user'); setUser(null); setSelectedContact(null); socket.disconnect(); socket.connect(); };
 
   if (!user) return <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900"><div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50"><Login onLogin={handleLogin} socket={socket} /></div></div>;
-  if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} />;
+  if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} quickReplies={quickReplies} />; // Pasamos quickReplies a Settings
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -93,7 +125,17 @@ function App() {
               {!isConnected && <div className="absolute top-0 left-0 right-0 bg-red-500 text-white text-xs text-center py-1 z-50 flex items-center justify-center gap-2"><div className="w-4 h-4 flex items-center justify-center"><WifiOff className="w-3 h-3" /></div><span>Sin conexión con el servidor. Reconectando...</span></div>}
               {selectedContact ? (
                 // @ts-ignore
-                <ChatWindow socket={socket} user={user} contact={selectedContact} config={config} onBack={() => setSelectedContact(null)} onlineUsers={onlineUsers} typingInfo={typingStatus} onOpenTemplates={() => setShowTemplates(true)} /> 
+                <ChatWindow 
+                    socket={socket} 
+                    user={user} 
+                    contact={selectedContact} 
+                    config={config} 
+                    onBack={() => setSelectedContact(null)} 
+                    onlineUsers={onlineUsers} 
+                    typingInfo={typingStatus} 
+                    onOpenTemplates={() => setShowTemplates(true)}
+                    quickReplies={quickReplies} // <--- Pasamos las respuestas rápidas
+                /> 
               ) : ( <div className="flex flex-col items-center justify-center h-full text-slate-300"><MessageCircle className="w-16 h-16 mb-4 opacity-50" /><p>Selecciona un chat</p></div> )}
             </div>
           </main>

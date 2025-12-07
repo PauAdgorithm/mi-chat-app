@@ -4,10 +4,11 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag 
+  LayoutTemplate, Tag, Zap // <--- Zap Importado
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
+import { QuickReply } from '../App'; // Importar interfaz
 
 interface ChatWindowProps {
   socket: any;
@@ -18,6 +19,7 @@ interface ChatWindowProps {
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
   onOpenTemplates: () => void;
+  quickReplies: QuickReply[]; // <--- Recibimos las respuestas
 }
 
 interface Message {
@@ -55,7 +57,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   return ( <div className={`flex items-start gap-2 p-2 rounded-xl w-full max-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}> <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" /> <button onClick={togglePlay} className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 mt-0.5 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}> {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />} </button> <div className="flex-1 flex flex-col gap-1 w-full min-w-0"> <div className="h-5 flex items-center"><input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`} /></div> <div className="flex justify-between items-center text-[10px] font-medium text-slate-500 h-5 w-full"> <span className="font-mono tabular-nums min-w-[35px]">{currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}</span> <div className="flex items-center gap-2"> <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 rounded text-[9px] font-bold min-w-[22px] text-center">{playbackRate}x</button> <div className="relative flex items-center group hidden sm:flex" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}> <button onClick={toggleMute} className="p-1 hover:text-slate-800"><Volume2 className="w-3.5 h-3.5" /></button> {showVolumeSlider && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 z-20"><div className="h-16 w-4 flex items-center justify-center"><input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div></div>} </div> <a href={src} download="audio.webm" target="_blank" rel="noreferrer" className="p-1 hover:bg-black/5 rounded-full"><Download className="w-3.5 h-3.5" /></a> </div> </div> </div> </div> );
 };
 
-export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates }: ChatWindowProps) {
+export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates, quickReplies }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -72,18 +74,19 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [crmNotes, setCrmNotes] = useState('');
   const [crmSignupDate, setCrmSignupDate] = useState('');
   
-  // ESTADO PARA TAGS DEL CLIENTE ACTUAL
   const [contactTags, setContactTags] = useState<string[]>(contact.tags || []);
-
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   
   const [showAssignMenu, setShowAssignMenu] = useState(false);
-  const [showTagMenu, setShowTagMenu] = useState(false); // <--- NUEVO MENU DE TAGS
+  const [showTagMenu, setShowTagMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false); 
   const [isInternalMode, setIsInternalMode] = useState(false); 
   const [isSaving, setIsSaving] = useState(false);
   
+  // ESTADO NUEVO: Mostrar lista de respuestas rápidas
+  const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
+
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
@@ -117,7 +120,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   useEffect(() => scrollToBottom(), [messages]); 
 
   // --- USE EFFECTS ---
-
   useEffect(() => {
     setName(contact.name || ''); 
     setDepartment(contact.department || ''); 
@@ -133,10 +135,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowEmojiPicker(false); 
     setIsRecording(false);
     setShowAssignMenu(false); 
-    setShowTagMenu(false); // Resetear menú tags
+    setShowTagMenu(false); 
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
-    
+    setShowQuickRepliesList(false); // Reset al cambiar chat
+
     setShowSearch(false);
     setChatSearchQuery('');
     setSearchMatches([]);
@@ -153,51 +156,31 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   }, [chatSearchQuery, messages]);
 
   useEffect(() => { if (searchMatches.length > 0 && searchMatches[currentMatchIdx]) { const { msgIndex, matchIndex } = searchMatches[currentMatchIdx]; const elementId = `match-${msgIndex}-${matchIndex}`; const el = document.getElementById(elementId); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }, [currentMatchIdx, searchMatches]);
-  
   const handleNextMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev + 1) % searchMatches.length); };
   const handlePrevMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length); };
 
-  useEffect(() => { 
-      if (contact.name) setName(contact.name); 
-      if (contact.department) setDepartment(contact.department); 
-      if (contact.status) setStatus(contact.status); 
-      if (contact.assigned_to) setAssignedTo(contact.assigned_to); 
-      if (contact.signup_date) setCrmSignupDate(contact.signup_date);
-      if (contact.tags) setContactTags(contact.tags);
-  }, [contact]); 
-
+  useEffect(() => { if (contact.name) setName(contact.name); if (contact.department) setDepartment(contact.department); if (contact.status) setStatus(contact.status); if (contact.assigned_to) setAssignedTo(contact.assigned_to); if (contact.signup_date) setCrmSignupDate(contact.signup_date); if (contact.tags) setContactTags(contact.tags); }, [contact]); 
   useEffect(() => { if (socket) { socket.emit('request_agents'); const handleAgentsList = (list: Agent[]) => setAgents(list); socket.on('agents_list', handleAgentsList); return () => { socket.off('agents_list', handleAgentsList); }; } }, [socket]);
   useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
-  
   const sendMessage = (e: React.FormEvent) => { e.preventDefault(); if (input.trim()) { const msg = { text: input, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; socket.emit('chatMessage', msg); setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); } };
-  
   const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
-  
-  // --- LÓGICA GESTIÓN DE TAGS ---
-  const toggleTag = (tag: string) => {
-      let newTags = [...contactTags];
-      if (newTags.includes(tag)) {
-          newTags = newTags.filter(t => t !== tag);
-      } else {
-          newTags.push(tag);
-      }
-      setContactTags(newTags);
-      updateCRM('tags', newTags); 
-  };
-
+  const toggleTag = (tag: string) => { let newTags = [...contactTags]; if (newTags.includes(tag)) { newTags = newTags.filter(t => t !== tag); } else { newTags.push(tag); } setContactTags(newTags); updateCRM('tags', newTags); };
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
-  
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
   const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; } };
-  
   const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
   const getDateLabel = (dateString: string) => { const date = new Date(dateString); if (isNaN(date.getTime())) return ""; const today = new Date(); const yesterday = new Date(); yesterday.setDate(today.getDate() - 1); if (date.toDateString() === today.toDateString()) return "Hoy"; if (date.toDateString() === yesterday.toDateString()) return "Ayer"; return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }); };
+
+  const insertQuickReply = (content: string) => {
+      setInput(prev => prev + (prev ? ' ' : '') + content);
+      setShowQuickRepliesList(false);
+  };
 
   const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
@@ -231,7 +214,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             
             <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'} ${isTemplate ? 'border-l-4 border-l-green-500 bg-green-50' : ''}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
-                
                 {isTemplate && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-green-700"><LayoutTemplate className="w-3 h-3" /> Plantilla WhatsApp</div>}
                 
                 {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
@@ -247,12 +229,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   }
 
   return (
-    <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); }}>
+    <div className="flex h-full bg-slate-50 relative" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); setShowQuickRepliesList(false); }}>
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
       <div className="flex flex-col flex-1 min-w-0 h-full border-r border-gray-200">
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {/* ... HEADER DEL CHAT ... */}
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
             <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
@@ -263,7 +244,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
-            
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -275,31 +255,16 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
                     <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
                     
-                    {/* --- NUEVO: BOTÓN DE ETIQUETAS EN EL HEADER --- */}
+                    {/* --- BOTÓN DE ETIQUETAS --- */}
                     <div className="relative">
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); setShowTagMenu(!showTagMenu); }}
-                            className="flex items-center gap-2 bg-orange-50 px-2 py-1.5 rounded-md border border-orange-200 text-xs font-bold text-orange-700 hover:bg-orange-100 transition-colors"
-                            title="Gestionar Etiquetas"
-                        >
-                            <Tag className="w-3.5 h-3.5" /> 
-                            {contactTags.length > 0 ? `${contactTags.length} Etiquetas` : 'Etiquetas'}
-                        </button>
-                        
+                        <button onClick={(e) => { e.stopPropagation(); setShowTagMenu(!showTagMenu); }} className="flex items-center gap-2 bg-orange-50 px-2 py-1.5 rounded-md border border-orange-200 text-xs font-bold text-orange-700 hover:bg-orange-100 transition-colors" title="Gestionar Etiquetas"><Tag className="w-3.5 h-3.5" /> {contactTags.length > 0 ? `${contactTags.length} Tags` : 'Tags'}</button>
                         {showTagMenu && (
                             <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 p-2 animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 px-2">Seleccionar Etiquetas</p>
                                  {config?.tags?.map(tag => {
                                      const isActive = contactTags.includes(tag);
                                      return (
-                                         <button 
-                                            key={tag} 
-                                            onClick={() => toggleTag(tag)}
-                                            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-orange-50 text-orange-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
-                                         >
-                                            {tag}
-                                            {isActive && <CheckCircle className="w-3 h-3" />}
-                                         </button>
+                                         <button key={tag} onClick={() => toggleTag(tag)} className={`w-full text-left px-2 py-1.5 text-xs rounded-lg mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-orange-50 text-orange-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>{tag} {isActive && <CheckCircle className="w-3 h-3" />}</button>
                                      )
                                  })}
                                  {(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic px-2">No hay etiquetas.</p>}
@@ -308,31 +273,20 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     </div>
                 </>
             )}
-
             <div className="flex-1"></div>
-            
-            {/* BUSCAR */}
             <div className="relative">
                 {showSearch ? (
                     <div className="flex items-center bg-slate-100 rounded-lg px-2 py-1 animate-in fade-in slide-in-from-right-5 absolute right-0 top-0 md:static z-20 shadow-md md:shadow-none min-w-[280px]">
                         <Search className="w-4 h-4 text-slate-400 mr-2" />
                         <input autoFocus className="bg-transparent border-none outline-none text-xs w-full text-slate-700" placeholder="Buscar..." value={chatSearchQuery} onChange={(e) => setChatSearchQuery(e.target.value)} onClick={(e) => e.stopPropagation()} />
-                        <div className="flex items-center border-l border-slate-300 pl-2 ml-2 gap-1">
-                            <span className="text-[10px] text-slate-400 mr-1">{searchMatches.length > 0 ? `${currentMatchIdx + 1}/${searchMatches.length}` : '0/0'}</span>
-                            <button onClick={(e) => { e.stopPropagation(); handlePrevMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronUp className="w-3 h-3"/></button>
-                            <button onClick={(e) => { e.stopPropagation(); handleNextMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronDown className="w-3 h-3"/></button>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); setShowSearch(false); setChatSearchQuery(''); }} className="ml-2 p-1 hover:bg-slate-200 rounded-full"><X className="w-3 h-3 text-slate-500"/></button>
+                        <div className="flex items-center border-l border-slate-300 pl-2 ml-2 gap-1"><span className="text-[10px] text-slate-400 mr-1">{searchMatches.length > 0 ? `${currentMatchIdx + 1}/${searchMatches.length}` : '0/0'}</span><button onClick={(e) => { e.stopPropagation(); handlePrevMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronUp className="w-3 h-3"/></button><button onClick={(e) => { e.stopPropagation(); handleNextMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronDown className="w-3 h-3"/></button></div><button onClick={(e) => { e.stopPropagation(); setShowSearch(false); setChatSearchQuery(''); }} className="ml-2 p-1 hover:bg-slate-200 rounded-full"><X className="w-3 h-3 text-slate-500"/></button>
                     </div>
-                ) : (
-                    <button onClick={(e) => { e.stopPropagation(); setShowSearch(true); }} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-500 transition" title="Buscar en conversación"><Search className="w-5 h-5"/></button>
-                )}
+                ) : ( <button onClick={(e) => { e.stopPropagation(); setShowSearch(true); }} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-500 transition" title="Buscar en conversación"><Search className="w-5 h-5"/></button> )}
             </div>
-            {/* INFO */}
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
-          <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); }}>
+          <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); setShowQuickRepliesList(false); }}>
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
             {renderedItems}
             <div ref={messagesEndRef} />
@@ -347,6 +301,24 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
               
               {/* BOTÓN PLANTILLAS */}
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
+
+              {/* --- BOTÓN RESPUESTAS RÁPIDAS (NUEVO) --- */}
+              <div className="relative">
+                  <button type="button" onClick={() => setShowQuickRepliesList(!showQuickRepliesList)} className="p-2 rounded-full text-slate-500 hover:text-yellow-600 hover:bg-yellow-50 transition" title="Respuestas Rápidas"><Zap className="w-5 h-5" /></button>
+                  {showQuickRepliesList && (
+                      <div className="absolute bottom-full left-0 mb-2 w-64 bg-white rounded-xl shadow-xl border border-slate-100 z-50 p-2 animate-in slide-in-from-bottom-2 fade-in">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 px-2">Respuestas Rápidas</p>
+                          <div className="max-h-60 overflow-y-auto space-y-1">
+                              {quickReplies && quickReplies.length > 0 ? quickReplies.map(qr => (
+                                  <button key={qr.id} onClick={() => insertQuickReply(qr.content)} className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-50 transition-colors group">
+                                      <div className="font-bold text-slate-700">{qr.title}</div>
+                                      <div className="text-[10px] text-slate-500 truncate group-hover:text-slate-600">{qr.content}</div>
+                                  </button>
+                              )) : <div className="text-xs text-slate-400 italic px-2">No hay respuestas configuradas.</div>}
+                          </div>
+                      </div>
+                  )}
+              </div>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 
@@ -367,7 +339,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                       <h2 className="text-lg font-bold text-slate-800 text-center">{name || "Sin nombre"}</h2>
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
-                  {/* SECCIÓN ETIQUETAS ELIMINADA DE AQUÍ (Ya está en el header) */}
                   <div className="space-y-4">
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><Mail className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} /></div></div>
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><MapPin className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/></div></div>
