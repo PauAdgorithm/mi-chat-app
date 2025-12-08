@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
+  Users, 
   Search, 
   RefreshCw, 
   UserCheck, 
@@ -9,7 +10,8 @@ import {
   ChevronDown, 
   X, 
   Hash,
-  CheckCircle 
+  CheckCircle,
+  Calendar as CalendarIcon 
 } from 'lucide-react';
 
 export interface Contact {
@@ -43,8 +45,7 @@ interface SidebarProps {
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
 }
 
-// Tipos de filtro
-type ViewScope = 'all' | 'mine' | 'unassigned';
+type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
 
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
@@ -52,12 +53,14 @@ const normalizePhone = (phone: string) => {
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView }: SidebarProps) {
+  // 1. ESTADOS (MOVIDOS AQUÍ ARRIBA PARA EVITAR EL ERROR DE PANTALLA BLANCA)
+  const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // 1. ESTADOS (Deben ir siempre arriba del todo)
-  const [viewScope, setViewScope] = useState<ViewScope>('all'); // Pestaña principal (Todos, Míos, Libres)
-  const [showFilters, setShowFilters] = useState(false); // Panel de filtros
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [filterValue, setFilterValue] = useState<string>(''); 
+  const [showFilters, setShowFilters] = useState(false);
   
   const [activeFilters, setActiveFilters] = useState({
       department: '',
@@ -74,7 +77,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 2. EFECTOS
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
@@ -151,7 +153,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
-  // 3. HELPERS
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
@@ -166,25 +167,18 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // 4. LÓGICA DE FILTRADO (Ahora que los estados están definidos, esto no fallará)
+  // --- LÓGICA DE FILTRADO (Ahora segura porque viewScope ya existe) ---
   const filteredContacts = contacts.filter(c => {
-      // Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // Pestañas Principales (viewScope)
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
-      // Filtros Avanzados (Dropdowns)
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
-      
-      // Etiquetas
-      if (activeFilters.tag) {
-          if (!c.tags || !c.tags.includes(activeFilters.tag)) return false;
-      }
+      if (activeFilters.tag && (!c.tags || !c.tags.includes(activeFilters.tag))) return false;
 
       return true;
   });
@@ -195,11 +189,20 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
-  // 5. RENDER
+  const handleFilterClick = (type: FilterType) => {
+      // Compatibilidad con botones antiguos si fuera necesario, 
+      // pero ahora usamos viewScope para las tabs principales.
+      if (type === 'all' || type === 'mine' || type === 'unassigned') {
+          setViewScope(type as any);
+      } else {
+          // Lógica para togglear el panel de filtros si pulsas botones extra
+          setShowFilters(true);
+      }
+  };
+
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
-      {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
@@ -211,7 +214,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             <input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
 
-        {/* TABS Y BOTÓN DE FILTROS */}
         <div className="flex gap-2 items-center">
             <div className="flex bg-slate-100 p-1 rounded-lg flex-1">
                 <button onClick={() => setViewScope('all')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
@@ -228,7 +230,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             </button>
         </div>
 
-        {/* PANEL DE FILTROS AVANZADOS */}
         {showFilters && (
             <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 animate-in slide-in-from-top-2 fade-in duration-200">
                 <div className="flex justify-between items-center mb-1">
@@ -237,7 +238,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                    {/* Depto */}
                     <div className="relative">
                         <select value={activeFilters.department} onChange={(e) => updateFilter('department', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Departamento</option>
@@ -246,7 +246,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                         <Briefcase className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* Estado */}
                     <div className="relative">
                         <select value={activeFilters.status} onChange={(e) => updateFilter('status', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Estado</option>
@@ -255,7 +254,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                         <CheckCircle className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* Etiqueta */}
                     <div className="relative">
                         <select value={activeFilters.tag} onChange={(e) => updateFilter('tag', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Etiqueta</option>
@@ -264,7 +262,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                         <Hash className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* Agente */}
                     <div className="relative">
                         <select value={activeFilters.agent} onChange={(e) => updateFilter('agent', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Agente</option>
@@ -277,7 +274,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
       
-      {/* LISTA CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
@@ -344,25 +340,31 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {/* FOOTER: Usuarios Online y Botón Calendario */}
       <div className="bg-slate-50 border-t border-slate-200 p-3">
-            <div className="flex justify-between items-center mb-2">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                    Online ({onlineUsers.length})
-                </h3>
-            </div>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                Online ({onlineUsers.length})
+            </h3>
+            <button 
+                onClick={() => setView('calendar')} 
+                className="p-1.5 bg-white border border-slate-200 rounded-md text-slate-400 hover:text-purple-600 hover:border-purple-200 transition shadow-sm"
+                title="Ver Agenda"
+            >
+                <CalendarIcon className="w-4 h-4" />
+            </button>
+          </div>
             
-            <div className="flex flex-wrap gap-2 mb-2">
-                {onlineUsers.map((agentName, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                        <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
-                            {agentName === user.username ? 'Tú' : agentName}
-                        </span>
-                    </div>
-                ))}
-            </div>
+          <div className="flex flex-wrap gap-2 mb-2">
+              {onlineUsers.map((agentName, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                      <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
+                          {agentName === user.username ? 'Tú' : agentName}
+                      </span>
+                  </div>
+              ))}
+          </div>
       </div>
     </div>
   );
