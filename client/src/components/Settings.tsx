@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
   LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3,
-  Calendar // <--- Importado icono Calendar
+  Calendar 
 } from 'lucide-react';
 
 // @ts-ignore
@@ -10,7 +10,7 @@ import WhatsAppTemplatesManager from './WhatsAppTemplatesManager';
 // @ts-ignore
 import AnalyticsDashboard from './AnalyticsDashboard';
 // @ts-ignore
-import CalendarDashboard from './CalendarDashboard'; // <--- IMPORTADO
+import CalendarDashboard from './CalendarDashboard';
 
 interface SettingsProps {
   onBack: () => void;
@@ -23,7 +23,6 @@ interface Agent { id: string; name: string; role: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
 export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }: SettingsProps) {
-  // AÑADIDO 'agenda' AL STATE
   const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda'>('team');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
@@ -31,7 +30,6 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
   const [success, setSuccess] = useState('');
   const [showMobileMenu, setShowMobileMenu] = useState(true);
 
-  // Estados modal
   const [modalType, setModalType] = useState<'none' | 'create_agent' | 'edit_agent' | 'delete_agent' | 'add_config' | 'edit_config' | 'delete_config' | 'add_quick_reply' | 'edit_quick_reply' | 'delete_quick_reply'>('none');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   
@@ -100,7 +98,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
       case 'whatsapp': return 'Plantillas WhatsApp';
       case 'quick_replies': return 'Respuestas Rápidas';
       case 'analytics': return 'Analíticas';
-      case 'agenda': return 'Agenda'; // <--- Título
+      case 'agenda': return 'Agenda';
     }
   };
 
@@ -151,7 +149,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
 
               {activeTab === 'analytics' && <div className="h-full"><AnalyticsDashboard /></div>}
               
-              {/* PESTAÑA NUEVA: AGENDA */}
+              {/* PESTAÑA AGENDA */}
               {activeTab === 'agenda' && <div className="h-full"><CalendarDashboard /></div>}
 
           </div>

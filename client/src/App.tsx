@@ -4,8 +4,9 @@ import { Login } from './components/Login';
 import { ChatWindow } from './components/ChatWindow';
 import { Sidebar, Contact } from './components/Sidebar';
 import { Settings } from './components/Settings';
-import { MessageCircle, LogOut, Settings as SettingsIcon, WifiOff } from 'lucide-react';
+import { MessageCircle, LogOut, Settings as SettingsIcon, WifiOff, ArrowLeft } from 'lucide-react';
 import ChatTemplateSelector from './components/ChatTemplateSelector';
+import CalendarDashboard from './components/CalendarDashboard'; // IMPORTADO
 
 const isProduction = window.location.hostname.includes('render.com');
 const BACKEND_URL = isProduction ? "https://chatgorithm.onrender.com" : "http://localhost:3000";
@@ -24,7 +25,6 @@ const getSavedUser = () => {
     return null;
 };
 
-// Interface para respuestas rápidas
 export interface QuickReply {
     id: string;
     title: string;
@@ -35,13 +35,12 @@ export interface QuickReply {
 function App() {
   const [user, setUser] = useState<{username: string, role: string} | null>(getSavedUser);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [view, setView] = useState<'chat' | 'settings'>('chat');
-  const [isConnected, setIsConnected] = useState(true);
   
-  // --- ESTADO PARA EL MODAL DE PLANTILLAS ---
+  // AÑADIDO 'calendar' A LAS VISTAS
+  const [view, setView] = useState<'chat' | 'settings' | 'calendar'>('chat');
+  
+  const [isConnected, setIsConnected] = useState(true);
   const [showTemplates, setShowTemplates] = useState(false);
-
-  // --- ESTADOS GLOBALES NUEVOS ---
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [typingStatus, setTypingStatus] = useState<{[chatId: string]: string}>({}); 
 
@@ -51,7 +50,6 @@ function App() {
       tags: [] 
   });
   
-  // ESTADO NUEVO: Respuestas Rápidas
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
 
   useEffect(() => {
@@ -119,13 +117,26 @@ function App() {
   const handleLogout = () => { localStorage.removeItem('chatgorithm_user'); sessionStorage.removeItem('chatgorithm_user'); setUser(null); setSelectedContact(null); socket.disconnect(); socket.connect(); };
 
   if (!user) return <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900"><div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50"><Login onLogin={handleLogin} socket={socket} /></div></div>;
+  
   if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} quickReplies={quickReplies} />;
+
+  // VISTA CALENDARIO AÑADIDA
+  if (view === 'calendar') {
+      return (
+        <div className="flex h-screen bg-slate-50 font-sans">
+            <div className="flex-1 flex flex-col relative">
+                <button onClick={() => setView('chat')} className="absolute top-4 left-4 z-50 bg-white p-2 rounded-full shadow-md border border-slate-200 hover:bg-slate-100 transition"><ArrowLeft className="w-6 h-6 text-slate-600"/></button>
+                <CalendarDashboard />
+            </div>
+        </div>
+      );
+  }
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
         <div className="flex w-full h-full max-w-[1800px] mx-auto bg-white shadow-2xl overflow-hidden md:h-screen border-x border-gray-200">
           <div className={`w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 ${selectedContact ? 'hidden md:flex' : 'flex'}`}>
-            <Sidebar user={user} socket={socket} onSelectContact={setSelectedContact} selectedContactId={selectedContact?.id} isConnected={isConnected} onlineUsers={onlineUsers} typingStatus={typingStatus} />
+            <Sidebar user={user} socket={socket} onSelectContact={setSelectedContact} selectedContactId={selectedContact?.id} isConnected={isConnected} onlineUsers={onlineUsers} typingStatus={typingStatus} setView={setView} />
             <div className="p-3 border-t border-slate-200 bg-white flex gap-2"><button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition" title="Configuración"><SettingsIcon className="w-5 h-5" /></button><div className="flex-1 flex items-center gap-2 bg-slate-50 px-3 rounded-lg border border-slate-100"><div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div><span className="text-xs font-bold text-slate-600 truncate">{user.username}</span></div><button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Salir"><LogOut className="w-5 h-5" /></button></div>
           </div>
           <main className={`flex-1 flex-col min-w-0 bg-white relative ${selectedContact ? 'flex' : 'hidden md:flex'}`}>
@@ -149,12 +160,11 @@ function App() {
           </main>
         </div>
         
-        
         <ChatTemplateSelector 
             isOpen={showTemplates} 
             onClose={() => setShowTemplates(false)} 
             targetPhone={selectedContact?.phone || ""}
-            senderName={user.username} 
+            senderName={user.username}
         />
     </div>
   );
