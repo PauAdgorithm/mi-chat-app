@@ -10,7 +10,7 @@ import WhatsAppTemplatesManager from './WhatsAppTemplatesManager';
 // @ts-ignore
 import AnalyticsDashboard from './AnalyticsDashboard';
 // @ts-ignore
-import CalendarDashboard from './CalendarDashboard';
+import CalendarDashboard from './CalendarDashboard'; // IMPORTADO
 
 interface SettingsProps {
   onBack: () => void;
@@ -30,6 +30,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
   const [success, setSuccess] = useState('');
   const [showMobileMenu, setShowMobileMenu] = useState(true);
 
+  // Estados modal
   const [modalType, setModalType] = useState<'none' | 'create_agent' | 'edit_agent' | 'delete_agent' | 'add_config' | 'edit_config' | 'delete_config' | 'add_quick_reply' | 'edit_quick_reply' | 'delete_quick_reply'>('none');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   
@@ -114,7 +115,9 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
               
               <div className="h-px bg-slate-100 my-2"></div>
 
+              {/* BOTÓN AGENDA AÑADIDO */}
               <button onClick={() => handleTabClick('agenda')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'agenda' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><Calendar className="w-5 h-5" /> Agenda</button>
+              
               <button onClick={() => handleTabClick('team')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'team' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><User className="w-5 h-5" /> Gestión de Equipo</button>
               <button onClick={() => handleTabClick('config')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'config' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><LayoutList className="w-5 h-5" /> Ajustes CRM</button>
               <button onClick={() => handleTabClick('whatsapp')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'whatsapp' ? 'bg-green-50 text-green-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><MessageSquare className="w-5 h-5" /> Plantillas WhatsApp</button>
@@ -138,7 +141,11 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
                   </div>
               )}
 
-              {activeTab === 'whatsapp' && <div className="max-w-5xl mx-auto"><WhatsAppTemplatesManager /></div>}
+              {activeTab === 'whatsapp' && (
+                  <div className="max-w-5xl mx-auto">
+                      <WhatsAppTemplatesManager />
+                  </div>
+              )}
               
               {activeTab === 'quick_replies' && (
                   <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -149,7 +156,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
 
               {activeTab === 'analytics' && <div className="h-full"><AnalyticsDashboard /></div>}
               
-              {/* PESTAÑA AGENDA */}
+              {/* PESTAÑA AGENDA AÑADIDA */}
               {activeTab === 'agenda' && <div className="h-full"><CalendarDashboard /></div>}
 
           </div>

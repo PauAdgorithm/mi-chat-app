@@ -6,6 +6,7 @@ import { Sidebar, Contact } from './components/Sidebar';
 import { Settings } from './components/Settings';
 import { MessageCircle, LogOut, Settings as SettingsIcon, WifiOff, ArrowLeft } from 'lucide-react';
 import ChatTemplateSelector from './components/ChatTemplateSelector';
+// IMPORTANTE: Importamos el calendario
 // @ts-ignore
 import CalendarDashboard from './components/CalendarDashboard';
 
@@ -62,7 +63,7 @@ function App() {
         console.log("🟢 Conectado/Reconectado");
         if (user) socket.emit('register_presence', user.username); 
         socket.emit('request_config');
-        socket.emit('request_quick_replies'); // Cargar respuestas rápidas
+        socket.emit('request_quick_replies'); 
     };
     
     const onDisconnect = () => {
@@ -120,10 +121,9 @@ function App() {
 
   if (!user) return <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900"><div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50"><Login onLogin={handleLogin} socket={socket} /></div></div>;
   
-  // VISTA AJUSTES
   if (view === 'settings') return <Settings onBack={() => setView('chat')} socket={socket} currentUserRole={user.role} quickReplies={quickReplies} />;
 
-  // VISTA CALENDARIO (NUEVA)
+  // --- VISTA CALENDARIO (AÑADIDA) ---
   if (view === 'calendar') {
       return (
         <div className="flex h-screen bg-slate-50 font-sans">
@@ -131,15 +131,13 @@ function App() {
                 {/* Botón flotante para volver al chat */}
                 <button 
                   onClick={() => setView('chat')} 
-                  className="absolute top-6 left-6 z-50 bg-white p-2.5 rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 transition-all active:scale-95 group"
+                  className="absolute top-6 left-6 z-50 bg-white p-2.5 rounded-full shadow-lg border border-slate-200 hover:bg-slate-100 transition-all active:scale-95 group"
                   title="Volver al Chat"
                 >
                   <ArrowLeft className="w-6 h-6 text-slate-600 group-hover:text-blue-600 transition-colors"/>
                 </button>
                 
-                {/* Renderizamos el calendario en modo Solo Lectura para evitar accidentes, 
-                    o editable si prefieres. Aquí lo pongo editable para máxima utilidad. 
-                    Si lo quieres solo lectura pon: <CalendarDashboard readOnly={true} /> */}
+                {/* Calendario en modo Solo Lectura */}
                 <CalendarDashboard readOnly={true} />
             </div>
         </div>
@@ -153,7 +151,6 @@ function App() {
           
           {/* BARRA LATERAL */}
           <div className={`w-full md:w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50/50 ${selectedContact ? 'hidden md:flex' : 'flex'}`}>
-            {/* Pasamos setView al Sidebar para que funcionen los botones del footer */}
             <Sidebar 
                 user={user} 
                 socket={socket} 
@@ -162,7 +159,7 @@ function App() {
                 isConnected={isConnected} 
                 onlineUsers={onlineUsers} 
                 typingStatus={typingStatus} 
-                setView={setView} // <--- CLAVE PARA NAVEGACIÓN
+                setView={setView} 
             />
             
             <div className="p-3 border-t border-slate-200 bg-white flex gap-2">
