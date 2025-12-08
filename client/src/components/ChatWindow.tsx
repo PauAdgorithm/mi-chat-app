@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap 
+  LayoutTemplate, Tag, Zap, Bot // <--- Bot Importado (Icono Robot)
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -19,7 +19,7 @@ interface ChatWindowProps {
   onlineUsers: string[];
   typingInfo: { [chatId: string]: string };
   onOpenTemplates: () => void;
-  quickReplies?: QuickReply[]; // Hacemos opcional para evitar errores si no llega
+  quickReplies?: QuickReply[]; 
 }
 
 interface Message {
@@ -167,7 +167,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
   
-  // --- FUNCIÓN DE ENVÍO MODIFICADA PARA EXPANDIR ATAJOS ---
+  // FUNCIÓN DE ENVÍO
   const sendMessage = (e: React.FormEvent) => { 
     e.preventDefault(); 
     
@@ -187,6 +187,15 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         setShowEmojiPicker(false); 
         setIsInternalMode(false); 
     } 
+  };
+
+  // --- NUEVA FUNCIÓN: DISPARAR IA MANUALMENTE ---
+  const handleTriggerAI = () => {
+    if (window.confirm("¿Quieres que la IA responda automáticamente a este cliente?")) {
+        socket.emit('trigger_ai_manual', { phone: contact.phone });
+        // Feedback visual instantáneo
+        alert("🤖 IA activada. Pensando respuesta...");
+    }
   };
   
   const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
@@ -355,6 +364,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                       </div>
                   )}
               </div>
+
+              {/* BOTÓN DE IA (NUEVO) */}
+              <button type="button" onClick={handleTriggerAI} className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-purple-50 transition" title="Delegar a IA"><Bot className="w-5 h-5" /></button>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 
