@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
-  LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3 
+  LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3,
+  Calendar // <--- Importado icono Calendar
 } from 'lucide-react';
 
 // @ts-ignore
 import WhatsAppTemplatesManager from './WhatsAppTemplatesManager';
 // @ts-ignore
-import AnalyticsDashboard from './AnalyticsDashboard'; // <--- IMPORTADO
+import AnalyticsDashboard from './AnalyticsDashboard';
+// @ts-ignore
+import CalendarDashboard from './CalendarDashboard'; // <--- IMPORTADO
 
 interface SettingsProps {
   onBack: () => void;
@@ -20,28 +23,18 @@ interface Agent { id: string; name: string; role: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
 export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }: SettingsProps) {
-  // AÑADIDO 'analytics' AL STATE
-  const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics'>('team');
+  // AÑADIDO 'agenda' AL STATE
+  const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda'>('team');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showMobileMenu, setShowMobileMenu] = useState(true);
 
-  // ... (Estados y useEffects IGUAL QUE ANTES) ...
-  // Copia el mismo bloque de hooks, modalType, forms, handlers, etc.
-  // ...
-
-  // (Por brevedad, asumo que copias el bloque de lógica existente aquí. 
-  // Lo importante es añadir el botón en el menú y el renderizado del componente).
-
-  // ... (Aquí iría todo el bloque de useEffects y handlers) ...
-  // (Como el código es largo, te indico las partes nuevas a continuación)
-
-  // ---------------------------------------------------------
-  // Bloque para simular el resto del componente sin repetir todo
+  // Estados modal
   const [modalType, setModalType] = useState<'none' | 'create_agent' | 'edit_agent' | 'delete_agent' | 'add_config' | 'edit_config' | 'delete_config' | 'add_quick_reply' | 'edit_quick_reply' | 'delete_quick_reply'>('none');
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  
   const [formName, setFormName] = useState('');
   const [formRole, setFormRole] = useState('Ventas');
   const [formPass, setFormPass] = useState('');
@@ -106,7 +99,8 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
       case 'config': return 'Ajustes CRM';
       case 'whatsapp': return 'Plantillas WhatsApp';
       case 'quick_replies': return 'Respuestas Rápidas';
-      case 'analytics': return 'Analíticas'; // <--- Título Nuevo
+      case 'analytics': return 'Analíticas';
+      case 'agenda': return 'Agenda'; // <--- Título
     }
   };
 
@@ -122,6 +116,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
               
               <div className="h-px bg-slate-100 my-2"></div>
 
+              <button onClick={() => handleTabClick('agenda')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'agenda' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><Calendar className="w-5 h-5" /> Agenda</button>
               <button onClick={() => handleTabClick('team')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'team' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><User className="w-5 h-5" /> Gestión de Equipo</button>
               <button onClick={() => handleTabClick('config')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'config' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><LayoutList className="w-5 h-5" /> Ajustes CRM</button>
               <button onClick={() => handleTabClick('whatsapp')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'whatsapp' ? 'bg-green-50 text-green-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><MessageSquare className="w-5 h-5" /> Plantillas WhatsApp</button>
@@ -154,8 +149,10 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
                   </div>
               )}
 
-              {/* PESTAÑA NUEVA: ANALÍTICAS */}
               {activeTab === 'analytics' && <div className="h-full"><AnalyticsDashboard /></div>}
+              
+              {/* PESTAÑA NUEVA: AGENDA */}
+              {activeTab === 'agenda' && <div className="h-full"><CalendarDashboard /></div>}
 
           </div>
       </div>
@@ -169,7 +166,6 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
                       {(modalType.includes('agent') && !modalType.includes('delete')) && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: Laura" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Rol</label><select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"><option value="Ventas">Ventas</option><option value="Taller">Taller</option><option value="Admin">Admin</option></select></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contraseña</label><input type="password" value={formPass} onChange={e => setFormPass(e.target.value)} placeholder={modalType === 'edit_agent' ? "Nueva contraseña (Opcional)" : "Contraseña (Opcional)"} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" /></div></>)}
                       {(modalType.includes('config') && !modalType.includes('delete')) && (<div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre {formType === 'Department' ? 'Departamento' : formType === 'Status' ? 'Estado' : 'Etiqueta'}</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: VIP" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>)}
                       
-                      {/* FORMULARIO QUICK REPLIES */}
                       {(modalType === 'add_quick_reply' || modalType === 'edit_quick_reply') && (
                           <>
                             <div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Título</label><input value={qrTitle} onChange={e => setQrTitle(e.target.value)} placeholder="Ej: Bienvenida" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>

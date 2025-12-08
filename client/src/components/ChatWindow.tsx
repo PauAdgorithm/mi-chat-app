@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap, Bot 
+  LayoutTemplate, Tag, Zap, Bot, StopCircle 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -85,14 +85,14 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isSaving, setIsSaving] = useState(false);
   
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
-
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
   
-  // NUEVO: ESTADO PARA EL INDICADOR DE IA
+  // ESTADOS IA
   const [aiThinking, setAiThinking] = useState(false);
+  const [isAiActive, setIsAiActive] = useState(false); 
 
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
 
@@ -143,7 +143,10 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
     setShowQuickRepliesList(false);
+    
+    // Reset estados IA
     setAiThinking(false);
+    setIsAiActive(false);
 
     setShowSearch(false);
     setChatSearchQuery('');
@@ -153,18 +156,30 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact.id, socket]); 
 
-  // --- ESCUCHAR ESTADO IA ---
+  // --- LISTENERS DE IA ---
   useEffect(() => {
       if (!socket) return;
+      
       const handleAiStatus = (data: { phone: string, status: string }) => {
           if (data.phone === contact.phone) {
               setAiThinking(data.status === 'thinking');
-              // Scroll al fondo si la IA empieza a escribir
               if (data.status === 'thinking') scrollToBottom();
           }
       };
+
+      const handleAiActive = (data: { phone: string, active: boolean }) => {
+          if (data.phone === contact.phone) {
+              setIsAiActive(data.active);
+          }
+      };
+
       socket.on('ai_status', handleAiStatus);
-      return () => { socket.off('ai_status', handleAiStatus); };
+      socket.on('ai_active_change', handleAiActive);
+      
+      return () => { 
+          socket.off('ai_status', handleAiStatus); 
+          socket.off('ai_active_change', handleAiActive);
+      };
   }, [socket, contact.phone]);
 
   useEffect(() => {
@@ -191,13 +206,24 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         const msg = { text: finalInput, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; 
         socket.emit('chatMessage', msg); 
         setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); 
+        
+        if (isAiActive) handleStopAI();
     } 
   };
 
   const handleTriggerAI = () => {
-    if (window.confirm("¿Quieres que la IA responda automáticamente a este cliente?")) {
-        socket.emit('trigger_ai_manual', { phone: contact.phone });
+    if (isAiActive) {
+        handleStopAI();
+    } else {
+        if (window.confirm("¿Quieres que la IA responda automáticamente a este cliente?")) {
+            socket.emit('trigger_ai_manual', { phone: contact.phone });
+        }
     }
+  };
+
+  const handleStopAI = () => {
+      socket.emit('stop_ai_manual', { phone: contact.phone });
+      setIsAiActive(false);
   };
   
   const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
@@ -229,7 +255,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       const isMe = m.sender !== contact.phone;
       const isNote = m.type === 'note';
       const isTemplate = m.type === 'template';
-      // Si el sender es "Bot IA", es un mensaje del sistema, pero lo tratamos como "mío" (isMe) para que salga a la derecha
       const isBot = m.sender === 'Bot IA';
 
       let messageContent: React.ReactNode = String(m.text || "");
@@ -326,8 +351,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
           {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
           
-          <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'}`}>
-            {/* PREVISUALIZACIÓN SHORTCUT */}
+          <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'} ${isAiActive ? 'border-t-4 border-purple-500 bg-purple-50' : ''}`}>
+            
+            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
             {matchingQR && (
                 <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
                     <Zap className="w-4 h-4 fill-current" />
@@ -335,6 +361,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     <span className="truncate flex-1 italic font-medium">{matchingQR.content}</span>
                     <span className="text-[10px] opacity-70 whitespace-nowrap">(Se enviará este texto)</span>
                 </div>
+            )}
+
+            {isAiActive && (
+                 <div className="absolute bottom-full left-0 w-full bg-purple-600 text-white p-2 text-xs font-bold flex items-center justify-between px-4 animate-in slide-in-from-bottom-2 z-20 shadow-md">
+                    <span className="flex items-center gap-2"><Bot className="w-4 h-4 animate-pulse"/> MODALIDAD AUTOMÁTICA ACTIVA</span>
+                    <button onClick={handleStopAI} className="bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-[10px] flex items-center gap-1 transition"><StopCircle className="w-3 h-3"/> DETENER IA</button>
+                 </div>
             )}
 
             <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
@@ -361,8 +394,15 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                   )}
               </div>
 
-              {/* BOTÓN MAGIA IA */}
-              <button type="button" onClick={handleTriggerAI} className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-purple-50 transition" title="Delegar a IA"><Bot className="w-5 h-5" /></button>
+              {/* BOTÓN MAGIA IA (CAMBIA DE COLOR SI ESTÁ ACTIVO) */}
+              <button 
+                type="button" 
+                onClick={handleTriggerAI} 
+                className={`p-2 rounded-full transition-all ${isAiActive ? 'bg-purple-600 text-white animate-pulse shadow-lg shadow-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`} 
+                title={isAiActive ? "Detener IA" : "Delegar a IA"}
+              >
+                {isAiActive ? <StopCircle className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+              </button>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 

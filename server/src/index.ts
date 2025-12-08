@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Persistente...");
+console.log("🚀 [BOOT] Arrancando servidor completo...");
 dotenv.config();
 
 const app = express();
@@ -53,13 +53,12 @@ const io = new Server(httpServer, {
 });
 
 const onlineUsers = new Map<string, string>();
-// MEMORIA DE SESIÓN: Chats donde la IA está activa actualmente
 const activeAiChats = new Set<string>();
 
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 // ==========================================
-//  HERRAMIENTAS DE LA IA (TOOLS)
+//  HERRAMIENTAS IA (AGENDA)
 // ==========================================
 
 async function getAvailableAppointments() {
@@ -73,13 +72,11 @@ async function getAvailableAppointments() {
         
         if (records.length === 0) return "No hay citas disponibles próximamente.";
         
-        // Devolvemos un formato muy claro para que GPT entienda el ID
         return records.map(r => {
             const date = new Date(r.get('Date') as string);
             const humanDate = date.toLocaleString('es-ES', { 
                 weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
             });
-            // Importante: Le damos el ID explícito a la IA
             return `ID: "${r.id}" -- FECHA: ${humanDate}`;
         }).join("\n");
     } catch (error: any) {
@@ -100,7 +97,8 @@ async function bookAppointment(appointmentId: string, clientPhone: string, clien
                 } 
             }
         ]);
-        // Al reservar, sacamos a la IA de la conversación
+        
+        // Cuando se reserva, la IA termina su trabajo y avisa al frontend
         activeAiChats.delete(cleanNumber(clientPhone));
         io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
@@ -117,7 +115,6 @@ async function assignDepartment(clientPhone: string, department: string) {
             await base('Contacts').update([{ id: contacts[0].id, fields: { "department": department, "status": "Abierto" } }]);
             io.emit('contact_updated_notification');
             
-            // Al asignar, la IA también termina su trabajo
             activeAiChats.delete(clean);
             io.emit('ai_active_change', { phone: clean, active: false });
 
@@ -127,7 +124,6 @@ async function assignDepartment(clientPhone: string, department: string) {
     } catch (e) { return "Error asignando departamento."; }
 }
 
-// Nueva herramienta para que la IA decida callarse
 async function stopConversation(phone: string) {
     activeAiChats.delete(cleanNumber(phone));
     io.emit('ai_active_change', { phone: cleanNumber(phone), active: false });
@@ -145,7 +141,6 @@ async function getChatHistory(phone: string, limit = 10) {
 
         return [...records].reverse().map((r: any) => {
             const sender = r.get('sender') as string;
-            // Identificar roles para GPT
             const role = (sender === 'Bot IA' || sender === 'Agente' || sender.match(/[a-zA-Z]/)) ? "assistant" : "user";
             const text = r.get('text') as string;
             return { role, content: text || "" } as any; 
@@ -160,7 +155,6 @@ async function getChatHistory(phone: string, limit = 10) {
 async function processAI(text: string, contactPhone: string, contactName: string) {
     if (!openai || !waToken || !waPhoneId) return;
     
-    // Aseguramos que está en la lista de activos
     activeAiChats.add(cleanNumber(contactPhone));
     io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'thinking' });
     io.emit('ai_active_change', { phone: cleanNumber(contactPhone), active: true });
@@ -170,15 +164,12 @@ async function processAI(text: string, contactPhone: string, contactName: string
 
         const messages = [
             { role: "system", content: `Eres 'ChatBot', el asistente de citas de Chatgorithm.
-            
-            OBJETIVO PRINCIPAL: Gestionar citas y clasificar clientes.
-            
-            REGLAS DE ORO:
-            1. NO inventes horas. Usa SIEMPRE 'get_available_appointments' para ver la realidad.
-            2. Cuando ofrezcas horas, sé claro.
-            3. Para reservar, necesitas el ID exacto que te devuelve la herramienta. Si el usuario dice "el martes", busca en la lista que obtuviste qué ID corresponde al martes y úsalo.
-            4. Cuando termines una gestión (cita reservada o departamento asignado), usa 'stop_conversation' o despídete claramente.
-            5. Habla español neutro y profesional.` },
+            OBJETIVO: Gestionar citas y clasificar clientes.
+            REGLAS:
+            1. Usa SIEMPRE 'get_available_appointments' para ver horas reales. NO inventes.
+            2. Para reservar, usa 'book_appointment' con el ID exacto que te dio la herramienta anterior.
+            3. Si asignas departamento o el cliente se despide, usa 'stop_conversation'.
+            4. Sé breve y profesional.` },
             ...history, 
             { role: "user", content: text } 
         ];
@@ -187,48 +178,10 @@ async function processAI(text: string, contactPhone: string, contactName: string
             model: "gpt-4o-mini",
             messages: messages as any,
             tools: [
-                {
-                    type: "function",
-                    function: {
-                        name: "get_available_appointments",
-                        description: "Consultar lista de fechas/horas libres. Devuelve IDs y Fechas."
-                    }
-                },
-                {
-                    type: "function",
-                    function: {
-                        name: "book_appointment",
-                        description: "Reservar una cita. REQUIERE el ID obtenido previamente.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                appointmentId: { type: "string", description: "El ID exacto (ej: recXXXXX) de la cita" }
-                            },
-                            required: ["appointmentId"]
-                        }
-                    }
-                },
-                {
-                    type: "function",
-                    function: {
-                        name: "assign_department",
-                        description: "Derivar a un humano (Ventas/Taller) y terminar.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                department: { type: "string", enum: ["Ventas", "Taller", "Admin"] }
-                            },
-                            required: ["department"]
-                        }
-                    }
-                },
-                {
-                    type: "function",
-                    function: {
-                        name: "stop_conversation",
-                        description: "Detener el bot automático (ej: el cliente se despide o no quiere nada)."
-                    }
-                }
+                { type: "function", function: { name: "get_available_appointments", description: "Ver horas libres." } },
+                { type: "function", function: { name: "book_appointment", description: "Reservar cita con ID.", parameters: { type: "object", properties: { appointmentId: { type: "string" } }, required: ["appointmentId"] } } },
+                { type: "function", function: { name: "assign_department", description: "Asignar departamento.", parameters: { type: "object", properties: { department: { type: "string", enum: ["Ventas", "Taller", "Admin"] } }, required: ["department"] } } },
+                { type: "function", function: { name: "stop_conversation", description: "Detener bot." } }
             ],
             tool_choice: "auto"
         });
@@ -243,23 +196,14 @@ async function processAI(text: string, contactPhone: string, contactName: string
             const args = JSON.parse(toolCall.function.arguments);
             let toolResult = "";
 
-            if (fnName === "get_available_appointments") {
-                toolResult = await getAvailableAppointments();
-            } else if (fnName === "book_appointment") {
-                toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
-            } else if (fnName === "assign_department") {
-                toolResult = await assignDepartment(contactPhone, args.department);
-            } else if (fnName === "stop_conversation") {
-                toolResult = await stopConversation(contactPhone);
-            }
+            if (fnName === "get_available_appointments") toolResult = await getAvailableAppointments();
+            else if (fnName === "book_appointment") toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
+            else if (fnName === "assign_department") toolResult = await assignDepartment(contactPhone, args.department);
+            else if (fnName === "stop_conversation") toolResult = await stopConversation(contactPhone);
 
             const secondResponse = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
-                messages: [
-                    ...messages,
-                    msg,
-                    { role: "tool", tool_call_id: toolCall.id, content: toolResult }
-                ] as any
+                messages: [ ...messages, msg, { role: "tool", tool_call_id: toolCall.id, content: toolResult } ] as any
             });
             
             const finalReply = secondResponse.choices[0].message.content;
@@ -269,11 +213,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
             await sendWhatsAppText(contactPhone, msg.content);
         }
 
-    } catch (error) {
-        console.error("❌ Error OpenAI:", error);
-    } finally {
-        io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' });
-    }
+    } catch (error) { console.error("❌ Error OpenAI:", error); } finally { io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' }); }
 }
 
 async function sendWhatsAppText(to: string, body: string) {
@@ -294,42 +234,29 @@ async function sendWhatsAppText(to: string, body: string) {
 // ==========================================
 //  WEBHOOKS
 // ==========================================
-
-app.get('/webhook', (req, res) => {
-  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']);
-  else res.sendStatus(403);
-});
-
+app.get('/webhook', (req, res) => { if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']); else res.sendStatus(403); });
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
     if (body.object && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-        const value = body.entry[0].changes[0].value;
-        const msgData = value.messages[0];
-        const profileName = value.contacts?.[0]?.profile?.name || "Cliente";
-        const from = msgData.from; 
+        const msg = body.entry[0].changes[0].value.messages[0];
+        const from = msg.from; 
         const cleanFrom = cleanNumber(from);
         
         let text = "(Media)";
-        if (msgData.type === 'text') text = msgData.text.body;
+        if (msg.type === 'text') text = msg.text.body;
 
         console.log(`📩 Mensaje de ${from}: ${text}`);
 
-        const contactRecord = await handleContactUpdate(from, text, profileName);
+        const contactRecord = await handleContactUpdate(from, text, body.entry[0].changes[0].value.contacts?.[0]?.profile?.name);
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type: 'text' });
 
-        // LÓGICA DE ACTIVACIÓN MEJORADA
-        // 1. Si el chat ya está en modo "IA Activa", la IA responde SIEMPRE.
-        if (activeAiChats.has(cleanFrom) && msgData.type === 'text') {
-             processAI(text, from, profileName);
-        }
-        // 2. Si no, activamos solo si es Nuevo y sin asignar (primer contacto)
-        else if (contactRecord && msgData.type === 'text') {
+        if (activeAiChats.has(cleanFrom) && msg.type === 'text') {
+             processAI(text, from, contactRecord?.get('name') as string || "Cliente");
+        } else if (contactRecord && msg.type === 'text') {
              const status = contactRecord.get('status');
              const assigned = contactRecord.get('assigned_to');
-             if (status === 'Nuevo' && !assigned) {
-                 processAI(text, from, profileName);
-             }
+             if (status === 'Nuevo' && !assigned) { processAI(text, from, contactRecord.get('name') as string || "Cliente"); }
         }
     }
     
@@ -349,114 +276,40 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ==========================================
-//  RESTO DE RUTAS (PLANTILLAS, MEDIA...)
+//  RUTAS API
 // ==========================================
 
-app.get('/api/templates', async (req, res) => {
+// CALENDARIO
+app.get('/api/appointments', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
-        const r = await base(TABLE_TEMPLATES).select().all();
-        res.json(r.map(x => ({ 
-            id: x.id, name: x.get('Name'), category: x.get('Category'), language: x.get('Language'),
-            body: x.get('Body'), footer: x.get('Footer'), status: x.get('Status'), 
-            variableMapping: x.get('VariableMapping') ? JSON.parse(x.get('VariableMapping') as string) : {} 
-        })));
+        const records = await base('Appointments').select({ sort: [{ field: "Date", direction: "asc" }] }).all();
+        res.json(records.map(r => ({ id: r.id, date: r.get('Date'), status: r.get('Status'), clientPhone: r.get('ClientPhone'), clientName: r.get('ClientName') })));
     } catch(e) { res.status(500).json({error:"Error"}); }
 });
 
-app.post('/api/create-template', async (req, res) => {
+app.post('/api/appointments', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
-        const { name, category, body, language, footer, variableExamples } = req.body;
-        let metaId = "meta_simulado_" + Date.now();
-        let status = "PENDING";
-        if (waToken && waBusinessId) {
-            try {
-                const metaPayload: any = { name, category, allow_category_change: true, language, components: [{ type: "BODY", text: body }] };
-                if (footer) metaPayload.components.push({ type: "FOOTER", text: footer });
-                const metaRes = await axios.post(`https://graph.facebook.com/v18.0/${waBusinessId}/message_templates`, metaPayload, { headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' } });
-                metaId = metaRes.data.id; status = metaRes.data.status || "PENDING";
-            } catch (metaError: any) { status = "REJECTED"; }
-        }
-        const createdRecords = await base(TABLE_TEMPLATES).create([{ fields: { "Name": name, "Category": category, "Language": language, "Body": body, "Footer": footer, "Status": status, "MetaId": metaId, "VariableMapping": JSON.stringify(variableExamples || {}) } }]);
-        res.json({ success: true, template: { id: createdRecords[0].id, name, category, language, body, footer, status, variableMapping: variableExamples } });
-    } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+        const { date, status, clientPhone, clientName } = req.body;
+        const created = await base('Appointments').create([{ fields: { "Date": date, "Status": status || 'Available', "ClientPhone": clientPhone, "ClientName": clientName } }]);
+        res.json({ success: true, appointment: { id: created[0].id, ...created[0].fields } });
+    } catch(e) { res.status(400).json({error: "Error"}); }
 });
 
-app.delete('/api/delete-template/:id', async (req, res) => {
+app.delete('/api/appointments/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
-    try { await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error" }); }
+    try { await base('Appointments').destroy([req.params.id]); res.json({ success: true }); } catch(e) { res.status(400).json({error: "Error"}); }
 });
 
-app.post('/api/send-template', async (req, res) => {
-    if (!waToken || !waPhoneId) return res.status(500).json({ error: "Credenciales" });
-    try {
-        const { templateName, language, phone, variables, previewText, senderName } = req.body;
-        const parameters = variables.map((val: string) => ({ type: "text", text: val }));
-        await axios.post(
-            `https://graph.facebook.com/v17.0/${waPhoneId}/messages`,
-            { messaging_product: "whatsapp", to: cleanNumber(phone), type: "template", template: { name: templateName, language: { code: language }, components: [{ type: "body", parameters: parameters }] } },
-            { headers: { Authorization: `Bearer ${waToken}` } }
-        );
-        const finalMessage = previewText || `📝 [Plantilla] ${templateName}`;
-        await saveAndEmitMessage({ 
-            text: finalMessage, 
-            sender: senderName || "Agente", // Nombre real
-            recipient: cleanNumber(phone), 
-            timestamp: new Date().toISOString(), 
-            type: "template" 
-        });
-        res.json({ success: true });
-    } catch (error: any) { res.status(400).json({ error: "Error envío" }); }
-});
-
-// ANALYTICS
-app.get('/api/analytics', async (req, res) => {
-    if (!base) return res.status(500).json({ error: "DB" });
-    try {
-        const contacts = await base('Contacts').select().all();
-        const messages = await base('Messages').select().all();
-        const totalContacts = contacts.length;
-        const totalMessages = messages.length;
-        const newLeads = contacts.filter(c => c.get('status') === 'Nuevo').length;
-        const last7Days = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return d.toISOString().split('T')[0]; }).reverse();
-        const activityData = last7Days.map(date => { const count = messages.filter(m => { const mDate = (m.get('timestamp') as string || "").split('T')[0]; return mDate === date; }).length; return { date, label: new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }), count }; });
-        const agentStats: Record<string, { msgs: number, uniqueChats: Set<string> }> = {};
-        messages.forEach(m => { const sender = (m.get('sender') as string) || ""; const recipient = (m.get('recipient') as string) || ""; const isPhone = /^\d+$/.test(sender.replace(/\D/g, '')); if (!isPhone && sender.toLowerCase() !== 'sistema' && sender.trim() !== '') { if (!agentStats[sender]) agentStats[sender] = { msgs: 0, uniqueChats: new Set() }; agentStats[sender].msgs += 1; if (recipient) agentStats[sender].uniqueChats.add(recipient); } });
-        const agentPerformance = Object.entries(agentStats).map(([name, data]) => ({ name, msgCount: data.msgs, chatCount: data.uniqueChats.size })).sort((a, b) => b.msgCount - a.msgCount).slice(0, 5);
-        const statusMap: Record<string, number> = {}; contacts.forEach(c => { const s = (c.get('status') as string) || 'Otros'; statusMap[s] = (statusMap[s] || 0) + 1; });
-        const statusDistribution = Object.entries(statusMap).map(([name, count]) => ({ name, count }));
-        res.json({ kpis: { totalContacts, totalMessages, newLeads }, activity: activityData, agents: agentPerformance, statuses: statusDistribution });
-    } catch (e) { res.status(500).json({ error: "Error" }); }
-});
-
+// PLANTILLAS
+app.get('/api/templates', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); const r = await base(TABLE_TEMPLATES).select().all(); res.json(r.map(x => ({ id: x.id, name: x.get('Name'), category: x.get('Category'), language: x.get('Language'), body: x.get('Body'), footer: x.get('Footer'), status: x.get('Status'), variableMapping: x.get('VariableMapping') ? JSON.parse(x.get('VariableMapping') as string) : {} }))); });
+app.post('/api/create-template', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { const { name, category, body, language, footer, variableExamples } = req.body; let metaId = "meta_simulado_" + Date.now(); let status = "PENDING"; if (waToken && waBusinessId) { try { const metaPayload: any = { name, category, allow_category_change: true, language, components: [{ type: "BODY", text: body }] }; if (footer) metaPayload.components.push({ type: "FOOTER", text: footer }); const metaRes = await axios.post(`https://graph.facebook.com/v18.0/${waBusinessId}/message_templates`, metaPayload, { headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' } }); metaId = metaRes.data.id; status = metaRes.data.status || "PENDING"; } catch (metaError: any) { status = "REJECTED"; } } const createdRecords = await base(TABLE_TEMPLATES).create([{ fields: { "Name": name, "Category": category, "Language": language, "Body": body, "Footer": footer, "Status": status, "MetaId": metaId, "VariableMapping": JSON.stringify(variableExamples || {}) } }]); res.json({ success: true, template: { id: createdRecords[0].id, name, category, language, body, footer, status, variableMapping: variableExamples } }); } catch (error: any) { res.status(400).json({ success: false, error: error.message }); } });
+app.delete('/api/delete-template/:id', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error" }); } });
+app.post('/api/send-template', async (req, res) => { if (!waToken || !waPhoneId) return res.status(500).json({ error: "Credenciales" }); try { const { templateName, language, phone, variables, previewText, senderName } = req.body; const parameters = variables.map((val: string) => ({ type: "text", text: val })); await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: cleanNumber(phone), type: "template", template: { name: templateName, language: { code: language }, components: [{ type: "body", parameters: parameters }] } }, { headers: { Authorization: `Bearer ${waToken}` } }); const finalMessage = previewText || `📝 [Plantilla] ${templateName}`; await saveAndEmitMessage({ text: finalMessage, sender: senderName || "Agente", recipient: cleanNumber(phone), timestamp: new Date().toISOString(), type: "template" }); res.json({ success: true }); } catch (error: any) { res.status(400).json({ error: "Error envío" }); } });
+app.get('/api/analytics', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { const contacts = await base('Contacts').select().all(); const messages = await base('Messages').select().all(); const totalContacts = contacts.length; const totalMessages = messages.length; const newLeads = contacts.filter(c => c.get('status') === 'Nuevo').length; const last7Days = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return d.toISOString().split('T')[0]; }).reverse(); const activityData = last7Days.map(date => { const count = messages.filter(m => { const mDate = (m.get('timestamp') as string || "").split('T')[0]; return mDate === date; }).length; return { date, label: new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }), count }; }); const agentStats: Record<string, { msgs: number, uniqueChats: Set<string> }> = {}; messages.forEach(m => { const sender = (m.get('sender') as string) || ""; const recipient = (m.get('recipient') as string) || ""; const isPhone = /^\d+$/.test(sender.replace(/\D/g, '')); if (!isPhone && sender.toLowerCase() !== 'sistema' && sender.trim() !== '') { if (!agentStats[sender]) agentStats[sender] = { msgs: 0, uniqueChats: new Set() }; agentStats[sender].msgs += 1; if (recipient) agentStats[sender].uniqueChats.add(recipient); } }); const agentPerformance = Object.entries(agentStats).map(([name, data]) => ({ name, msgCount: data.msgs, chatCount: data.uniqueChats.size })).sort((a, b) => b.msgCount - a.msgCount).slice(0, 5); const statusMap: Record<string, number> = {}; contacts.forEach(c => { const s = (c.get('status') as string) || 'Otros'; statusMap[s] = (statusMap[s] || 0) + 1; }); const statusDistribution = Object.entries(statusMap).map(([name, count]) => ({ name, count })); res.json({ kpis: { totalContacts, totalMessages, newLeads }, activity: activityData, agents: agentPerformance, statuses: statusDistribution }); } catch (e) { res.status(500).json({ error: "Error" }); } });
 app.get('/api/media/:id', async (req, res) => { if (!waToken) return res.sendStatus(500); try { const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${req.params.id}`, { headers: { 'Authorization': `Bearer ${waToken}` } }); const mediaRes = await axios.get(urlRes.data.url, { headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream' }); res.setHeader('Content-Type', mediaRes.headers['content-type']); mediaRes.data.pipe(res); } catch (e) { res.sendStatus(404); } });
-app.post('/api/upload', upload.single('file'), async (req: any, res: any) => { 
-  try { 
-    const file = req.file; const { targetPhone, senderName } = req.body; 
-    if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" }); 
-    const formData = new FormData(); formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype }); formData.append('messaging_product', 'whatsapp'); 
-    const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } }); 
-    const mediaId = uploadRes.data.id; 
-    let msgType = 'document'; 
-    if (file.mimetype.startsWith('image')) msgType = 'image'; 
-    else if (file.mimetype.startsWith('audio')) msgType = 'audio'; 
-    const payload: any = { messaging_product: "whatsapp", to: cleanNumber(targetPhone), type: msgType }; 
-    payload[msgType] = { id: mediaId, ...(msgType === 'document' && { filename: file.originalname }) }; 
-    await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { headers: { Authorization: `Bearer ${waToken}` } }); 
-    
-    // CORRECCIÓN: Definición de variables antes de usarlas
-    let textLog = file.originalname; 
-    let saveType = 'document';
-    if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; } 
-    else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; } 
-    else if (file.mimetype.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; }
-    
-    await saveAndEmitMessage({ text: textLog, sender: senderName || "Agente", recipient: cleanNumber(targetPhone), timestamp: new Date().toISOString(), type: saveType, mediaId }); 
-    await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`); 
-    res.json({ success: true }); 
-  } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); } 
-});
+app.post('/api/upload', upload.single('file'), async (req: any, res: any) => { try { const file = req.file; const { targetPhone, senderName } = req.body; if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" }); const formData = new FormData(); formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype }); formData.append('messaging_product', 'whatsapp'); const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } }); const mediaId = uploadRes.data.id; let msgType = 'document'; if (file.mimetype.startsWith('image')) msgType = 'image'; else if (file.mimetype.startsWith('audio')) msgType = 'audio'; const payload: any = { messaging_product: "whatsapp", to: cleanNumber(targetPhone), type: msgType }; payload[msgType] = { id: mediaId, ...(msgType === 'document' && { filename: file.originalname }) }; await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { headers: { Authorization: `Bearer ${waToken}` } }); let textLog = file.originalname; let saveType = 'document'; if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; } else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; } else if (file.mimetype.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; } await saveAndEmitMessage({ text: textLog, sender: senderName || "Agente", recipient: cleanNumber(targetPhone), timestamp: new Date().toISOString(), type: saveType, mediaId }); await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error subiendo" }); } });
 
 // --- HELPERS ---
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
@@ -490,16 +343,13 @@ async function saveAndEmitMessage(msg: any) {
 
 io.on('connection', (socket) => {
   socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
-  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
-  socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Eliminado correctamente'); } });
-  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Actualizado correctamente'); } });
-
-  // Quick Replies
+  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
+  socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
+  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
   socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('update_quick_reply', async (d) => { if (base) { await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
-
   socket.on('request_agents', async () => { if (base) { const r = await base('Agents').select().all(); socket.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); } });
   socket.on('login_attempt', async (data) => { if(!base) return; const r = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (r.length > 0) { const pwd = r[0].get('password'); if (!pwd || String(pwd).trim() === "") socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else if (String(pwd) === String(data.password)) socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else socket.emit('login_error', 'Contraseña incorrecta'); } else socket.emit('login_error', 'Usuario no encontrado'); });
   socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
@@ -508,29 +358,35 @@ io.on('connection', (socket) => {
   socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [] }))); } });
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
+  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
   
-  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
-
-  // MANUAL AI TRIGGER (CON MEMORIA)
+  // MANUAL AI TRIGGER
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;
     console.log(`🤖 Trigger Manual IA para ${phone}`);
     let name = "Cliente";
     if (base) {
+        activeAiChats.add(cleanNumber(phone));
+        io.emit('ai_active_change', { phone: cleanNumber(phone), active: true });
+
         const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanNumber(phone)}'` }).firstPage();
         if (records.length > 0) name = (records[0].get('name') as string) || "Cliente";
         
-        // Obtenemos historial reciente para la IA
         const msgs = await base('Messages').select({ 
-            filterByFormula: `OR({sender}='${cleanNumber(phone)}',{recipient}='${cleanNumber(phone)}')`, 
+            filterByFormula: `{sender} = '${cleanNumber(phone)}'`, 
             sort: [{field: "timestamp", direction: "desc"}],
             maxRecords: 1
         }).firstPage();
         
-        // Si hay mensaje previo, usamos ese como trigger, si no un saludo
         const text = msgs.length > 0 ? (msgs[0].get('text') as string) : "Hola";
         processAI(text, phone, name);
     }
+  });
+
+  socket.on('stop_ai_manual', (data) => {
+     const { phone } = data;
+     activeAiChats.delete(cleanNumber(phone));
+     io.emit('ai_active_change', { phone: cleanNumber(phone), active: false });
   });
 
   socket.on('register_presence', (u: string) => { if (u) { onlineUsers.set(socket.id, u); io.emit('online_users_update', Array.from(new Set(onlineUsers.values()))); } });
