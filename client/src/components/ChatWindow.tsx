@@ -416,13 +416,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
       {showDetailsPanel && (
           <div className="w-80 bg-white border-l border-gray-200 shadow-xl flex flex-col h-full animate-in slide-in-from-right duration-300 shrink-0 z-30">
-              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50"><h3 className="font-bold text-slate-700">Detalles del Cliente</h3><button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button></div>
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                  <h3 className="font-bold text-slate-700">Detalles del Cliente</h3>
+                  <button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button>
+              </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
                   <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-3 border-4 border-white shadow-sm">{contact.avatar ? <img src={contact.avatar} className="w-full h-full rounded-full object-cover"/> : <User className="w-10 h-10"/>}</div>
                       <h2 className="text-lg font-bold text-slate-800 text-center">{name || "Sin nombre"}</h2>
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
+
                   <div className="space-y-4">
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><Mail className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} /></div></div>
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><MapPin className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/></div></div>
