@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap, Bot // <--- Bot Importado (Icono Robot)
+  LayoutTemplate, Tag, Zap, Bot 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -90,8 +90,10 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
+  
+  // NUEVO: ESTADO PARA EL INDICADOR DE IA
+  const [aiThinking, setAiThinking] = useState(false);
 
-  // DETECTAR SHORTCUT ACTIVO (PREVISUALIZACIÓN)
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
 
   const typingUser = typingInfo[contact.phone] || null;
@@ -141,6 +143,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setShowDetailsPanel(false); 
     setIsInternalMode(false);
     setShowQuickRepliesList(false);
+    setAiThinking(false);
 
     setShowSearch(false);
     setChatSearchQuery('');
@@ -149,6 +152,20 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact.id, socket]); 
+
+  // --- ESCUCHAR ESTADO IA ---
+  useEffect(() => {
+      if (!socket) return;
+      const handleAiStatus = (data: { phone: string, status: string }) => {
+          if (data.phone === contact.phone) {
+              setAiThinking(data.status === 'thinking');
+              // Scroll al fondo si la IA empieza a escribir
+              if (data.status === 'thinking') scrollToBottom();
+          }
+      };
+      socket.on('ai_status', handleAiStatus);
+      return () => { socket.off('ai_status', handleAiStatus); };
+  }, [socket, contact.phone]);
 
   useEffect(() => {
       if (!chatSearchQuery.trim()) { setSearchMatches([]); setCurrentMatchIdx(0); return; }
@@ -163,38 +180,23 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   useEffect(() => { if (contact.name) setName(contact.name); if (contact.department) setDepartment(contact.department); if (contact.status) setStatus(contact.status); if (contact.assigned_to) setAssignedTo(contact.assigned_to); if (contact.signup_date) setCrmSignupDate(contact.signup_date); if (contact.tags) setContactTags(contact.tags); }, [contact]); 
   useEffect(() => { if (socket) { socket.emit('request_agents'); const handleAgentsList = (list: Agent[]) => setAgents(list); socket.on('agents_list', handleAgentsList); return () => { socket.off('agents_list', handleAgentsList); }; } }, [socket]);
-  useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
+  useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.sender === 'Bot IA' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
   
-  // FUNCIÓN DE ENVÍO
   const sendMessage = (e: React.FormEvent) => { 
     e.preventDefault(); 
-    
-    // Verificar si el input actual es un atajo y sustituirlo por el contenido
     const finalInput = matchingQR ? matchingQR.content : input;
-
     if (finalInput.trim()) { 
-        const msg = { 
-            text: finalInput, // Enviamos el texto expandido
-            sender: user.username, 
-            targetPhone: contact.phone, 
-            timestamp: new Date().toISOString(), 
-            type: isInternalMode ? 'note' : 'text' 
-        }; 
+        const msg = { text: finalInput, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; 
         socket.emit('chatMessage', msg); 
-        setInput(''); 
-        setShowEmojiPicker(false); 
-        setIsInternalMode(false); 
+        setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); 
     } 
   };
 
-  // --- NUEVA FUNCIÓN: DISPARAR IA MANUALMENTE ---
   const handleTriggerAI = () => {
     if (window.confirm("¿Quieres que la IA responda automáticamente a este cliente?")) {
         socket.emit('trigger_ai_manual', { phone: contact.phone });
-        // Feedback visual instantáneo
-        alert("🤖 IA activada. Pensando respuesta...");
     }
   };
   
@@ -210,10 +212,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
   const getDateLabel = (dateString: string) => { const date = new Date(dateString); if (isNaN(date.getTime())) return ""; const today = new Date(); const yesterday = new Date(); yesterday.setDate(today.getDate() - 1); if (date.toDateString() === today.toDateString()) return "Hoy"; if (date.toDateString() === yesterday.toDateString()) return "Ayer"; return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }); };
 
-  const insertQuickReply = (content: string) => {
-      setInput(prev => prev + (prev ? ' ' : '') + content);
-      setShowQuickRepliesList(false);
-  };
+  const insertQuickReply = (content: string) => { setInput(prev => prev + (prev ? ' ' : '') + content); setShowQuickRepliesList(false); };
 
   const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
@@ -230,6 +229,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       const isMe = m.sender !== contact.phone;
       const isNote = m.type === 'note';
       const isTemplate = m.type === 'template';
+      // Si el sender es "Bot IA", es un mensaje del sistema, pero lo tratamos como "mío" (isMe) para que salga a la derecha
+      const isBot = m.sender === 'Bot IA';
 
       let messageContent: React.ReactNode = String(m.text || "");
       
@@ -241,14 +242,15 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       }
 
       renderedItems.push(
-        <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+        <div key={i} className={`flex ${isMe || isBot ? 'justify-end' : 'justify-start'}`}>
           <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
             {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
             
-            <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : isMe ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'} ${isTemplate ? 'border-l-4 border-l-green-500 bg-green-50' : ''}`}>
+            <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : (isMe || isBot) ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'} ${isTemplate ? 'border-l-4 border-l-green-500 bg-green-50' : ''} ${isBot ? 'border-2 border-purple-200 bg-purple-50' : ''}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
                 {isTemplate && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-green-700"><LayoutTemplate className="w-3 h-3" /> Plantilla WhatsApp</div>}
-                
+                {isBot && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-purple-600"><Bot className="w-3 h-3" /> Respuesta Automática</div>}
+
                 {m.type === 'image' && m.mediaId ? <div className="mb-1 group relative"><img src={`${API_URL}/api/media/${m.mediaId}`} alt="Imagen" className="rounded-lg max-w-full md:max-w-[280px] h-auto object-contain cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedImage(`${API_URL}/api/media/${m.mediaId}`); }} /></div>
                 : m.type === 'audio' && m.mediaId ? <CustomAudioPlayer src={`${API_URL}/api/media/${m.mediaId}`} isMe={isMe} />
                 : m.type === 'document' && m.mediaId ? <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200 min-w-[150px]"><div className="bg-red-100 p-2 rounded-full text-red-500"><FileText className="w-6 h-6" /></div><div className="flex-1 min-w-0"><p className="font-semibold text-slate-700 truncate text-xs">{m.text}</p><p className="text-[10px] text-slate-400">Documento</p></div><a href={`${API_URL}/api/media/${m.mediaId}`} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-blue-500 hover:bg-slate-100 rounded-full transition"><Download className="w-4 h-4" /></a></div>
@@ -277,6 +279,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
+            {/* Header Controls */}
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -287,22 +290,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     <div className="flex items-center gap-2 bg-blue-50 px-2 rounded-md border border-blue-200"><UserCheck className="w-4 h-4 text-blue-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-blue-700 focus:ring-0 cursor-pointer font-bold tracking-wide min-w-[120px]" value={assignedTo} onChange={(e) => { setAssignedTo(e.target.value); updateCRM('assigned_to', e.target.value); }}><option value="">Sin Asignar</option>{agents.map(a => (<option key={a.id} value={a.name}>{a.name}</option>))}</select></div>
                     <div className="flex items-center gap-2 bg-purple-50 px-2 rounded-md border border-purple-200"><Briefcase className="w-4 h-4 text-purple-600" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-purple-700 focus:ring-0 cursor-pointer font-bold uppercase tracking-wide" value={department} onChange={(e) => { setDepartment(e.target.value); updateCRM('department', e.target.value); }}><option value="">Sin Dpto</option>{config?.departments?.map(d => <option key={d} value={d}>{d}</option>) || <option value="Ventas">Ventas</option>}</select></div>
                     <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200"><CheckCircle className="w-4 h-4 text-slate-400" /><select className="text-xs bg-transparent border-none rounded-md py-1.5 pr-6 text-slate-600 focus:ring-0 cursor-pointer font-medium" value={status} onChange={(e) => { setStatus(e.target.value); updateCRM('status', e.target.value); }}>{config?.statuses?.map(s => <option key={s} value={s}>{s}</option>) || <option value="Nuevo">Nuevo</option>}</select></div>
-                    
-                    {/* --- BOTÓN DE ETIQUETAS --- */}
                     <div className="relative">
                         <button onClick={(e) => { e.stopPropagation(); setShowTagMenu(!showTagMenu); }} className="flex items-center gap-2 bg-orange-50 px-2 py-1.5 rounded-md border border-orange-200 text-xs font-bold text-orange-700 hover:bg-orange-100 transition-colors" title="Gestionar Etiquetas"><Tag className="w-3.5 h-3.5" /> {contactTags.length > 0 ? `${contactTags.length} Tags` : 'Tags'}</button>
-                        {showTagMenu && (
-                            <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 p-2 animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
-                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 px-2">Seleccionar Etiquetas</p>
-                                 {config?.tags?.map(tag => {
-                                     const isActive = contactTags.includes(tag);
-                                     return (
-                                         <button key={tag} onClick={() => toggleTag(tag)} className={`w-full text-left px-2 py-1.5 text-xs rounded-lg mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-orange-50 text-orange-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>{tag} {isActive && <CheckCircle className="w-3 h-3" />}</button>
-                                     )
-                                 })}
-                                 {(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic px-2">No hay etiquetas.</p>}
-                            </div>
-                        )}
+                        {showTagMenu && (<div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 p-2 animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 px-2">Seleccionar Etiquetas</p>{config?.tags?.map(tag => { const isActive = contactTags.includes(tag); return (<button key={tag} onClick={() => toggleTag(tag)} className={`w-full text-left px-2 py-1.5 text-xs rounded-lg mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-orange-50 text-orange-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>{tag} {isActive && <CheckCircle className="w-3 h-3" />}</button>) })}{(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic px-2">No hay etiquetas.</p>}</div>)}
                     </div>
                 </>
             )}
@@ -322,14 +312,22 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); setShowQuickRepliesList(false); }}>
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
             {renderedItems}
+            {/* INDICADOR DE QUE LA IA ESTÁ PENSANDO */}
+            {aiThinking && (
+                <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
+                    <div className="bg-purple-50 text-purple-700 p-3 rounded-xl rounded-tl-none border border-purple-100 shadow-sm flex items-center gap-2">
+                        <Bot className="w-4 h-4 animate-bounce" />
+                        <span className="text-xs font-bold">IA Escribiendo...</span>
+                    </div>
+                </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
           {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
           
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'}`}>
-            
-            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
+            {/* PREVISUALIZACIÓN SHORTCUT */}
             {matchingQR && (
                 <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
                     <Zap className="w-4 h-4 fill-current" />
@@ -343,10 +341,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
               
-              {/* BOTÓN PLANTILLAS */}
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
 
-              {/* BOTÓN RESPUESTAS RÁPIDAS */}
               <div className="relative">
                   <button type="button" onClick={() => setShowQuickRepliesList(!showQuickRepliesList)} className="p-2 rounded-full text-slate-500 hover:text-yellow-600 hover:bg-yellow-50 transition" title="Respuestas Rápidas"><Zap className="w-5 h-5" /></button>
                   {showQuickRepliesList && (
@@ -365,7 +361,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                   )}
               </div>
 
-              {/* BOTÓN DE IA (NUEVO) */}
+              {/* BOTÓN MAGIA IA */}
               <button type="button" onClick={handleTriggerAI} className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-purple-50 transition" title="Delegar a IA"><Bot className="w-5 h-5" /></button>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
