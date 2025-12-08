@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  Users, 
   Search, 
   RefreshCw, 
   UserCheck, 
@@ -30,7 +29,6 @@ export interface Contact {
   tags?: string[];
 }
 
-// Interfaces para los desplegables
 interface Agent { id: string; name: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
@@ -48,7 +46,6 @@ interface SidebarProps {
 // Tipos de filtro
 type ViewScope = 'all' | 'mine' | 'unassigned';
 
-// Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
@@ -58,11 +55,10 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // --- ESTADOS DE FILTRO (Corregido el orden) ---
-  const [viewScope, setViewScope] = useState<ViewScope>('all'); // Pestaña principal
-  const [showFilters, setShowFilters] = useState(false); // Mostrar panel de filtros
+  // 1. ESTADOS (Deben ir siempre arriba del todo)
+  const [viewScope, setViewScope] = useState<ViewScope>('all'); // Pestaña principal (Todos, Míos, Libres)
+  const [showFilters, setShowFilters] = useState(false); // Panel de filtros
   
-  // Filtros Avanzados Seleccionados
   const [activeFilters, setActiveFilters] = useState({
       department: '',
       status: '',
@@ -70,7 +66,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       agent: ''
   });
   
-  // DATOS PARA LISTAS DESPLEGABLES
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
   const [availableDepts, setAvailableDepts] = useState<string[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
@@ -79,7 +74,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Carga inicial de datos
+  // 2. EFECTOS
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
@@ -88,7 +83,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     }
   }, [socket, isConnected]);
 
-  // Limpiar contador al entrar en un chat
   useEffect(() => {
       if (selectedContactId) {
           const contact = contacts.find(c => c.id === selectedContactId);
@@ -109,21 +103,18 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     if (!socket) return;
 
-    // --- HANDLERS ---
     const handleContactsUpdate = (newContacts: any) => {
       if (Array.isArray(newContacts)) setContacts(newContacts);
     };
 
     const handleAgentsList = (list: Agent[]) => setAvailableAgents(list);
     
-    // Aquí procesamos TODAS las configuraciones (Deptos, Estados, Tags)
     const handleConfigList = (list: ConfigItem[]) => {
         setAvailableDepts(list.filter(i => i.type === 'Department').map(i => i.name));
         setAvailableStatuses(list.filter(i => i.type === 'Status').map(i => i.name));
         setAvailableTags(list.filter(i => i.type === 'Tag').map(i => i.name));
     };
 
-    // --- LISTENERS ---
     socket.on('contacts_update', handleContactsUpdate);
     socket.on('agents_list', handleAgentsList);     
     socket.on('config_list', handleConfigList);     
@@ -160,6 +151,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
+  // 3. HELPERS
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
@@ -174,22 +166,22 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // --- LÓGICA DE FILTRADO COMBINADO ---
+  // 4. LÓGICA DE FILTRADO (Ahora que los estados están definidos, esto no fallará)
   const filteredContacts = contacts.filter(c => {
-      // 1. Buscador (Texto)
+      // Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // 2. Vista Principal (Tabs) - AHORA viewScope YA ESTÁ DEFINIDO
+      // Pestañas Principales (viewScope)
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
-      // 3. Filtros Avanzados (Dropdowns)
+      // Filtros Avanzados (Dropdowns)
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
       
-      // Filtrado por Etiquetas (si tiene la etiqueta seleccionada)
+      // Etiquetas
       if (activeFilters.tag) {
           if (!c.tags || !c.tags.includes(activeFilters.tag)) return false;
       }
@@ -203,17 +195,17 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
+  // 5. RENDER
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
-      {/* CABECERA DEL SIDEBAR */}
+      {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
             {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
         </h2>
         
-        {/* BUSCADOR */}
         <div className="relative mb-3">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -236,7 +228,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
             </button>
         </div>
 
-        {/* PANEL DE FILTROS AVANZADOS (DESPLEGABLE) */}
+        {/* PANEL DE FILTROS AVANZADOS */}
         {showFilters && (
             <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 animate-in slide-in-from-top-2 fade-in duration-200">
                 <div className="flex justify-between items-center mb-1">
@@ -285,6 +277,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
       
+      {/* LISTA CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
@@ -331,7 +324,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                       <div className="flex gap-1 mt-2 flex-wrap items-center">
                           {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
                           
-                          {/* TAGS EN LA LISTA */}
+                          {/* TAGS */}
                           {contact.tags && contact.tags.slice(0, 2).map(tag => (
                               <span key={tag} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-700 border border-orange-100">
                                 <Hash size={8} /> {tag}
@@ -351,13 +344,16 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {onlineUsers.length > 0 && (
-        <div className="bg-slate-50 border-t border-slate-200 p-3">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                Equipo Online ({onlineUsers.length})
-            </h3>
-            <div className="flex flex-wrap gap-2">
+      {/* FOOTER: Usuarios Online y Botón Calendario */}
+      <div className="bg-slate-50 border-t border-slate-200 p-3">
+            <div className="flex justify-between items-center mb-2">
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    Online ({onlineUsers.length})
+                </h3>
+            </div>
+            
+            <div className="flex flex-wrap gap-2 mb-2">
                 {onlineUsers.map((agentName, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
                         <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
@@ -367,8 +363,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                     </div>
                 ))}
             </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
