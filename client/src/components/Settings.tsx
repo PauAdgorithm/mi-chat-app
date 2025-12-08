@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
   LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3,
-  Calendar 
+  Calendar // <--- Icono Importado
 } from 'lucide-react';
 
 // @ts-ignore
@@ -10,7 +10,7 @@ import WhatsAppTemplatesManager from './WhatsAppTemplatesManager';
 // @ts-ignore
 import AnalyticsDashboard from './AnalyticsDashboard';
 // @ts-ignore
-import CalendarDashboard from './CalendarDashboard'; // IMPORTADO
+import CalendarDashboard from './CalendarDashboard'; // <--- Componente Importado
 
 interface SettingsProps {
   onBack: () => void;
@@ -23,6 +23,7 @@ interface Agent { id: string; name: string; role: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
 export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }: SettingsProps) {
+  // AÑADIDO 'agenda' AL STATE
   const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda'>('team');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
@@ -111,11 +112,13 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
       </div>
       <div className="flex flex-1 overflow-hidden relative">
           <div className={`absolute inset-0 bg-white z-10 flex flex-col p-4 space-y-2 transition-transform duration-300 md:relative md:translate-x-0 md:w-64 md:border-r md:border-gray-200 ${!showMobileMenu ? '-translate-x-full' : 'translate-x-0'}`}>
+              
+              {/* BOTÓN ANALÍTICAS */}
               <button onClick={() => handleTabClick('analytics')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><BarChart3 className="w-5 h-5" /> Analíticas</button>
               
               <div className="h-px bg-slate-100 my-2"></div>
 
-              {/* BOTÓN AGENDA AÑADIDO */}
+              {/* BOTÓN AGENDA - ¡AQUÍ ESTÁ! */}
               <button onClick={() => handleTabClick('agenda')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'agenda' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><Calendar className="w-5 h-5" /> Agenda</button>
               
               <button onClick={() => handleTabClick('team')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'team' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><User className="w-5 h-5" /> Gestión de Equipo</button>
@@ -156,7 +159,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
 
               {activeTab === 'analytics' && <div className="h-full"><AnalyticsDashboard /></div>}
               
-              {/* PESTAÑA AGENDA AÑADIDA */}
+              {/* PESTAÑA AGENDA - RENDERIZADO */}
               {activeTab === 'agenda' && <div className="h-full"><CalendarDashboard /></div>}
 
           </div>
