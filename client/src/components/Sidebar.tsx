@@ -10,7 +10,7 @@ import {
   ChevronDown, 
   X, 
   Hash,
-  CheckCircle // <--- AÑADIDO: Faltaba esta importación
+  CheckCircle 
 } from 'lucide-react';
 
 export interface Contact {
@@ -45,8 +45,8 @@ interface SidebarProps {
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
 }
 
-// Tipos de filtro ampliados
-type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
+// Tipos de filtro
+type ViewScope = 'all' | 'mine' | 'unassigned';
 
 // Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
@@ -58,23 +58,23 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // ESTADOS DE FILTRO
-  const [filter, setFilter] = useState<FilterType>('all');
-  const [filterValue, setFilterValue] = useState<string>(''); 
+  // --- ESTADOS DE FILTRO (Corregido el orden) ---
+  const [viewScope, setViewScope] = useState<ViewScope>('all'); // Pestaña principal
+  const [showFilters, setShowFilters] = useState(false); // Mostrar panel de filtros
   
-  // DATOS PARA LISTAS DESPLEGABLES
-  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
-  const [availableDepts, setAvailableDepts] = useState<string[]>([]);
-  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-
+  // Filtros Avanzados Seleccionados
   const [activeFilters, setActiveFilters] = useState({
       department: '',
       status: '',
       tag: '',
       agent: ''
   });
-  const [showFilters, setShowFilters] = useState(false);
+  
+  // DATOS PARA LISTAS DESPLEGABLES
+  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
+  const [availableDepts, setAvailableDepts] = useState<string[]>([]);
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
 
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -180,7 +180,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // 2. Vista Principal (Tabs)
+      // 2. Vista Principal (Tabs) - AHORA viewScope YA ESTÁ DEFINIDO
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
@@ -196,8 +196,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
       return true;
   });
-
-  const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
 
   const updateFilter = (key: keyof typeof activeFilters, value: string) => {
       setActiveFilters(prev => ({ ...prev, [key]: value }));
@@ -353,31 +351,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {/* FOOTER: Botón de Calendario + Configuración */}
-      <div className="p-3 border-t border-slate-200 bg-white flex gap-2">
-          {/* Botón rápido a Ajustes */}
-          <button onClick={() => setView('settings')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition" title="Configuración">
-             {/* Importante: En Sidebar.tsx no teníamos el icono Settings importado, así que he eliminado este botón del footer del sidebar 
-                 porque ya está en App.tsx o Settings.tsx. 
-                 Si lo quieres aquí, avísame. De momento dejo solo el Calendario y Config que pediste. */}
-             {/* Para evitar errores, dejo solo el slot preparado si no tienes el icono. */}
-             {/* He mantenido el prop 'setView' para poder cambiar de vista desde aquí */}
-          </button>
-          
-          {/* BOTÓN RÁPIDO A CALENDARIO (Nuevo) */}
-          {/* Necesitas importar CalendarIcon arriba si quieres usar este botón aquí */}
-          
-          {/* ... (Tu footer original de usuario) ... */}
-          {/* Como este archivo reemplaza al Sidebar, asegúrate de que el footer 
-              coincida con lo que tenías en App.tsx o donde estuviera el footer. 
-              En tu código original, el footer estaba DENTRO de App.tsx, fuera del componente Sidebar.
-              
-              Si quieres el botón DENTRO del Sidebar, descomenta esto y añade la importación:
-              <button onClick={() => setView('calendar')} ... ><CalendarIcon ... /></button>
-          */}
-      </div>
-      
-      {/* Footer de Usuarios Online */}
       {onlineUsers.length > 0 && (
         <div className="bg-slate-50 border-t border-slate-200 p-3">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
