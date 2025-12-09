@@ -246,16 +246,16 @@ OBJETIVO:
                     }
                 },
                 {
-                    type: "function",
-                    function: {
-                        name: "book_appointment",
-                        description: "Reservar cita. REQUIERE el ID que empieza por 'rec'.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                appointmentId: { type: "string", description: "El ID exacto de la cita (rec...)" }
-                            },
-                            required: ["appointmentId"]
+                     type: "function",
+  function: {
+    name: "book_appointment",
+    description: "Reserva UNA cita. SOLO acepta appointmentId exacto que empieza por rec. NO incluyas fecha ni texto.",
+    parameters: {
+      type: "object",
+      properties: {
+        appointmentId: { type: "string", description: "ID exacto rec... de la lista." }
+      },
+      required: ["appointmentId"]
                         }
                     }
                 },
