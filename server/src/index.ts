@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Laura v7 (Fix Citas)...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Laura v8 (Confirmación Auto)...");
 dotenv.config();
 
 const app = express();
@@ -18,7 +18,7 @@ app.use(express.json());
 
 // RUTA "PING"
 app.get('/', (req, res) => {
-  res.send('🤖 Servidor Chatgorithm (Laura v7) funcionando correctamente 🚀');
+  res.send('🤖 Servidor Chatgorithm (Laura v8) funcionando correctamente 🚀');
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -77,13 +77,10 @@ async function getAvailableAppointments() {
         }).all();
         
         const now = new Date();
-        // Filtramos pasadas
         const validRecords = records.filter(r => new Date(r.get('Date') as string) > now);
 
         if (validRecords.length === 0) return "No hay citas futuras disponibles. Pide al cliente otra fecha.";
         
-        // FORMATO ULTRA SIMPLIFICADO PARA LA IA
-        // Evitamos comillas y caracteres raros que la confundan
         return validRecords.map(r => {
             const date = new Date(r.get('Date') as string);
             
@@ -91,10 +88,8 @@ async function getAvailableAppointments() {
             const time = date.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit' });
             const weekday = date.toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid', weekday: 'long' });
 
-            // Ejemplo: ID:rec123abc - Martes 2023-10-10 a las 10:00
             return `ID:${r.id} - ${weekday} ${isoDate} a las ${time}`;
         }).join("\n");
-
     } catch (error: any) {
         console.error("Error leyendo citas:", error);
         return "Error técnico al leer la agenda.";
@@ -104,35 +99,42 @@ async function getAvailableAppointments() {
 async function bookAppointment(appointmentId: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
     
-    // LIMPIEZA DE ID ROBUSTA
-    // 1. Quitamos comillas y espacios
+    // Limpieza extrema del ID
     let cleanId = appointmentId.trim().replace(/['"]/g, '');
-    // 2. Quitamos prefijo "ID:" o "id:" si la IA lo incluyó
     if (cleanId.toUpperCase().startsWith("ID:")) cleanId = cleanId.substring(3).trim();
-    if (cleanId.toUpperCase().startsWith("ID")) cleanId = cleanId.substring(2).trim(); // Por si puso "ID "
-    // 3. Quitamos puntos finales (error común de GPT)
+    if (cleanId.toUpperCase().startsWith("ID")) cleanId = cleanId.substring(2).trim();
     if (cleanId.endsWith(".")) cleanId = cleanId.slice(0, -1);
     
-    console.log(`📅 INTENTO RESERVA | Raw: "${appointmentId}" | Clean: "${cleanId}" | Cliente: ${clientName}`);
+    console.log(`📅 INTENTO RESERVA: ID "${cleanId}" para ${clientName}`);
     
     try {
         const record = await base('Appointments').find(cleanId);
         if (!record) return "❌ Error: ID no encontrado. Asegúrate de copiar el ID exacto de la lista.";
         if (record.get('Status') !== 'Available') return "❌ Esa hora ya no está libre. Pide elegir otra.";
 
-        await base('Appointments').update([{ 
-            id: cleanId, 
-            fields: { "Status": "Booked", "ClientPhone": clientPhone, "ClientName": clientName } 
-        }]);
+        // Obtenemos la fecha legible para devolvérsela a la IA
+        const dateVal = new Date(record.get('Date') as string);
+        const humanDate = dateVal.toLocaleString('es-ES', { 
+            timeZone: 'Europe/Madrid',
+            weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
+        });
+
+        await base('Appointments').update([
+            { 
+                id: cleanId, 
+                fields: { "Status": "Booked", "ClientPhone": clientPhone, "ClientName": clientName } 
+            }
+        ]);
         
         activeAiChats.delete(cleanNumber(clientPhone));
         io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
-        return "✅ Cita confirmada exitosamente. Despídete.";
+        // MENSAJE DE ÉXITO EXPLÍCITO PARA LA IA
+        return `✅ RESERVA COMPLETADA: La cita ha sido guardada para el ${humanDate}. INFÓRMASELO AL CLIENTE AHORA MISMO confirmando fecha y hora.`;
     } catch (e: any) { 
-        console.error("Error reservando:", e);
-        if (e.error === 'NOT_FOUND') return "❌ Error técnico: ID de cita no válido.";
-        return "❌ Error técnico al guardar."; 
+        console.error("Error reservando cita (Airtable):", e);
+        if (e.error === 'NOT_FOUND') return "❌ Error: El ID de la cita no existe.";
+        return "❌ Error técnico al guardar en la base de datos."; 
     }
 }
 
@@ -197,7 +199,6 @@ async function processAI(text: string, contactPhone: string, contactName: string
             weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' 
         });
 
-        // Prompt ajustado para que entienda mejor la lista
         const messages = [
             { role: "system", content: `Eres 'Laura', asistente de Chatgorithm.
             
@@ -206,9 +207,9 @@ async function processAI(text: string, contactPhone: string, contactName: string
             TU TRABAJO:
             1. Ver huecos libres con 'get_available_appointments'.
             2. La lista que recibes tiene este formato: "ID:recXXXXX - Fecha...".
-            3. Para reservar, debes extraer SOLAMENTE el código que empieza por "rec" (ej: rec123abc) y pasarlo a 'book_appointment'.
-            4. Si reservas con éxito, confirma y despídete.
-            5. Tono profesional, amable, sin emojis.
+            3. Para reservar, debes extraer SOLAMENTE el código ID (ej: rec123abc) y usar 'book_appointment'.
+            4. **IMPORTANTE:** Cuando 'book_appointment' te devuelva el mensaje de éxito con la fecha, DEBES CONFIRMÁRSELO AL CLIENTE INMEDIATAMENTE en tu respuesta final (ej: "Perfecto, he reservado tu cita para el [Fecha]").
+            5. Tono: Profesional, amable, sin emojis.
             ` },
             ...history, 
             { role: "user", content: text } 
@@ -229,7 +230,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
                     type: "function",
                     function: {
                         name: "book_appointment",
-                        description: "Reservar cita. El appointmentId debe ser el código ID (empieza por 'rec') de la lista.",
+                        description: "Reservar cita. OBLIGATORIO usar el ID de la lista.",
                         parameters: {
                             type: "object",
                             properties: {
@@ -302,7 +303,11 @@ async function processAI(text: string, contactPhone: string, contactName: string
             await sendWhatsAppText(contactPhone, msg.content);
         }
 
-    } catch (error) { console.error("❌ Error OpenAI:", error); } finally { io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' }); }
+    } catch (error) {
+        console.error("❌ Error OpenAI:", error);
+    } finally {
+        io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' });
+    }
 }
 
 async function sendWhatsAppText(to: string, body: string) {
@@ -458,14 +463,18 @@ async function saveAndEmitMessage(msg: any) { io.emit('message', msg); if (base)
 // ==========================================
 
 io.on('connection', (socket) => {
-  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
+  // ... (Tus eventos de socket anteriores)
+  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('Name'), type: x.get('Type') }))); } }); // Corregido 'Name' y 'Type' para coincidir con Airtable si usas mayúsculas
   socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
   socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Eliminado correctamente'); } });
   socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Actualizado correctamente'); } });
+
+  // Quick Replies
   socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('update_quick_reply', async (d) => { if (base) { await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
+
   socket.on('request_agents', async () => { if (base) { const r = await base('Agents').select().all(); socket.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); } });
   socket.on('login_attempt', async (data) => { if(!base) return; const r = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (r.length > 0) { const pwd = r[0].get('password'); if (!pwd || String(pwd).trim() === "") socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else if (String(pwd) === String(data.password)) socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else socket.emit('login_error', 'Contraseña incorrecta'); } else socket.emit('login_error', 'Usuario no encontrado'); });
   socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
@@ -475,6 +484,8 @@ io.on('connection', (socket) => {
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
+
+  // MANUAL AI TRIGGER (CON MEMORIA)
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;
     console.log(`🤖 Trigger Manual IA para ${phone}`);
@@ -489,6 +500,7 @@ io.on('connection', (socket) => {
         processAI(text, phone, name);
     }
   });
+
   socket.on('stop_ai_manual', (d) => { activeAiChats.delete(cleanNumber(d.phone)); io.emit('ai_active_change', { phone: cleanNumber(d.phone), active: false }); });
   socket.on('register_presence', (u: string) => { if (u) { onlineUsers.set(socket.id, u); io.emit('online_users_update', Array.from(new Set(onlineUsers.values()))); } });
   socket.on('disconnect', () => { if (onlineUsers.has(socket.id)) { onlineUsers.delete(socket.id); io.emit('online_users_update', Array.from(new Set(onlineUsers.values()))); } });
