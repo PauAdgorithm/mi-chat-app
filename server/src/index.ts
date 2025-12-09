@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Laura v4 (Depuración Citas)...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Laura v5 (Fix IDs)...");
 dotenv.config();
 
 const app = express();
@@ -18,7 +18,7 @@ app.use(express.json());
 
 // RUTA "PING"
 app.get('/', (req, res) => {
-  res.send('🤖 Servidor Chatgorithm (Laura v4) funcionando correctamente 🚀');
+  res.send('🤖 Servidor Chatgorithm (Laura v5) funcionando correctamente 🚀');
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -73,7 +73,7 @@ async function getAvailableAppointments() {
         const records = await base('Appointments').select({
             filterByFormula: "{Status} = 'Available'",
             sort: [{ field: "Date", direction: "asc" }],
-            maxRecords: 20 // Miramos 20 para filtrar pasadas
+            maxRecords: 20 
         }).all();
         
         const now = new Date();
@@ -81,14 +81,15 @@ async function getAvailableAppointments() {
 
         if (validRecords.length === 0) return "No hay citas disponibles. Pide al cliente que proponga otro día.";
         
-        // FORMATO LIMPIO SIN COMILLAS PARA QUE LA IA NO FALLE
+        // FORMATO SIMPLIFICADO PARA EVITAR ERRORES DE PARSEO
         return validRecords.map(r => {
             const date = new Date(r.get('Date') as string);
             const humanDate = date.toLocaleString('es-ES', { 
                 timeZone: 'Europe/Madrid',
                 weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
             });
-            return `ID: ${r.id} | ${humanDate}`;
+            // Enviamos el ID limpio, sin comillas ni etiquetas extrañas
+            return `${r.id} (${humanDate})`;
         }).join("\n");
     } catch (error: any) {
         console.error("Error leyendo citas:", error);
@@ -99,31 +100,42 @@ async function getAvailableAppointments() {
 async function bookAppointment(appointmentId: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
     
-    // Limpieza del ID por si la IA mete comillas o espacios
-    const cleanId = appointmentId.trim().replace(/['"]/g, '');
+    // LIMPIEZA AGRESIVA DEL ID (Vital para evitar el error NOT_FOUND)
+    // Elimina "ID:", espacios, comillas y cualquier texto que no sea el ID puro
+    let cleanId = appointmentId.trim().replace(/['"]/g, '');
+    if (cleanId.toUpperCase().startsWith("ID:")) {
+        cleanId = cleanId.substring(3).trim();
+    }
     
-    console.log(`📅 EJECUTANDO RESERVA: ID ${cleanId} para ${clientName}`);
+    console.log(`📅 EJECUTANDO RESERVA: ID Original "${appointmentId}" -> Limpio "${cleanId}"`);
     
     try {
         // 1. Verificamos si existe y está libre
         const record = await base('Appointments').find(cleanId);
         
-        if (!record) return "❌ Error: El ID de la cita no existe.";
+        if (!record) return "❌ Error: El ID de la cita no es válido o no existe.";
         if (record.get('Status') !== 'Available') return "❌ Esa hora ya ha sido reservada por otra persona. Pide elegir otra.";
 
         // 2. Reservamos
-        await base('Appointments').update([{ 
-            id: cleanId, 
-            fields: { "Status": "Booked", "ClientPhone": clientPhone, "ClientName": clientName } 
-        }]);
+        await base('Appointments').update([
+            { 
+                id: cleanId, 
+                fields: { 
+                    "Status": "Booked", 
+                    "ClientPhone": clientPhone, 
+                    "ClientName": clientName 
+                } 
+            }
+        ]);
         
         // 3. Finalizamos sesión IA tras éxito
         activeAiChats.delete(cleanNumber(clientPhone));
         io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
-        return "✅ Cita reservada correctamente. Confirma la hora al cliente y despídete.";
+        return "✅ Cita reservada con éxito. Confirma la hora al cliente y despídete.";
     } catch (e: any) { 
-        console.error("Error reservando cita:", e);
+        console.error("Error reservando cita (Airtable):", e);
+        if (e.error === 'NOT_FOUND') return "❌ Error: El ID de la cita no existe. Asegúrate de copiar el ID exacto de la lista.";
         return "❌ Error técnico al guardar en la base de datos."; 
     }
 }
@@ -195,12 +207,11 @@ async function processAI(text: string, contactPhone: string, contactName: string
             TU OBJETIVO: Cerrar citas o clasificar.
             
             INSTRUCCIONES ESTRICTAS:
-            1. Para ver huecos usa 'get_available_appointments'. NUNCA inventes horas. Si la herramienta dice que no hay, di que no hay.
-            2. Para reservar, EL CLIENTE DEBE ELEGIR UNA HORA PRIMERO. Luego usa 'book_appointment' con el ID exacto de esa hora (ej: recXXXX).
-            3. Si la reserva falla (la herramienta devuelve error), díselo al cliente. Si funciona, confirma y despídete.
-            4. Tono: Cercano, profesional, SIN EMOJIS.
-            5. Si es avería/técnico -> 'assign_department' (Taller).
-            6. Si es precios/ventas -> 'assign_department' (Ventas).
+            1. Para ver huecos usa 'get_available_appointments'. NUNCA inventes horas. 
+            2. La lista de citas tiene el formato: "ID_CITA (FECHA)".
+            3. Cuando el cliente elija una hora, DEBES copiar el "ID_CITA" (el código raro al principio) y pasarlo a la función 'book_appointment'.
+            4. Si la reserva falla, díselo al cliente. Si funciona, confirma y despídete.
+            5. Tono: Cercano, profesional, SIN EMOJIS.
             ` },
             ...history, 
             { role: "user", content: text } 
@@ -210,8 +221,8 @@ async function processAI(text: string, contactPhone: string, contactName: string
             model: "gpt-4o-mini",
             messages: messages as any,
             tools: [
-                { type: "function", function: { name: "get_available_appointments", description: "Ver horas libres reales." } },
-                { type: "function", function: { name: "book_appointment", description: "Reservar cita. REQUIERE ID.", parameters: { type: "object", properties: { appointmentId: { type: "string" } }, required: ["appointmentId"] } } },
+                { type: "function", function: { name: "get_available_appointments", description: "Ver lista de ID y Fechas libres." } },
+                { type: "function", function: { name: "book_appointment", description: "Reservar cita usando el ID.", parameters: { type: "object", properties: { appointmentId: { type: "string" } }, required: ["appointmentId"] } } },
                 { type: "function", function: { name: "assign_department", description: "Derivar a humano.", parameters: { type: "object", properties: { department: { type: "string", enum: ["Ventas", "Taller", "Admin"] } }, required: ["department"] } } },
                 { type: "function", function: { name: "stop_conversation", description: "Finalizar bot." } }
             ],
@@ -419,7 +430,6 @@ io.on('connection', (socket) => {
   socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [] }))); } });
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
-  
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
   // MANUAL AI TRIGGER (CON MEMORIA)
@@ -452,4 +462,4 @@ io.on('connection', (socket) => {
   socket.on('typing', (d) => { socket.broadcast.emit('remote_typing', d); });
 });
 
-httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo en puerto ${PORT}`); });
+httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo ${PORT}`); });
