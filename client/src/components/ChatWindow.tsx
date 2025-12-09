@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap, Bot, StopCircle, UploadCloud // <--- Icono nuevo
+  LayoutTemplate, Tag, Zap, Bot, StopCircle, UploadCloud 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -85,7 +85,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isSaving, setIsSaving] = useState(false);
   
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
-
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
@@ -95,8 +94,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [aiThinking, setAiThinking] = useState(false);
   const [isAiActive, setIsAiActive] = useState(false); 
   
-  // ESTADO DRAG & DROP (NUEVO)
+  // ESTADOS DRAG & DROP Y ARCHIVOS PENDIENTES
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
 
@@ -148,10 +148,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setIsInternalMode(false);
     setShowQuickRepliesList(false);
     
-    // Reset estados IA y Drag
+    // Reset estados
     setAiThinking(false);
     setIsAiActive(false);
     setIsDragging(false);
+    setPendingFile(null); // Limpiar archivo pendiente al cambiar de chat
 
     setShowSearch(false);
     setChatSearchQuery('');
@@ -164,23 +165,19 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // --- LISTENERS DE IA ---
   useEffect(() => {
       if (!socket) return;
-      
       const handleAiStatus = (data: { phone: string, status: string }) => {
           if (data.phone === contact.phone) {
               setAiThinking(data.status === 'thinking');
               if (data.status === 'thinking') scrollToBottom();
           }
       };
-
       const handleAiActive = (data: { phone: string, active: boolean }) => {
           if (data.phone === contact.phone) {
               setIsAiActive(data.active);
           }
       };
-
       socket.on('ai_status', handleAiStatus);
       socket.on('ai_active_change', handleAiActive);
-      
       return () => { 
           socket.off('ai_status', handleAiStatus); 
           socket.off('ai_active_change', handleAiActive);
@@ -204,8 +201,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
   
-  const sendMessage = (e: React.FormEvent) => { 
+  // --- FUNCIÓN DE ENVÍO UNIFICADA (ARCHIVO Y TEXTO) ---
+  const sendMessage = async (e: React.FormEvent) => { 
     e.preventDefault(); 
+    
+    // 1. Si hay archivo pendiente, lo subimos
+    if (pendingFile) {
+        await uploadFile(pendingFile);
+        setPendingFile(null); // Limpiar después de enviar
+    }
+
+    // 2. Si hay texto, lo enviamos
     const finalInput = matchingQR ? matchingQR.content : input;
     if (finalInput.trim()) { 
         const msg = { text: finalInput, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; 
@@ -235,7 +241,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const toggleTag = (tag: string) => { let newTags = [...contactTags]; if (newTags.includes(tag)) { newTags = newTags.filter(t => t !== tag); } else { newTags.push(tag); } setContactTags(newTags); updateCRM('tags', newTags); };
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
+  
+  // MODIFICADO: Seleccionar archivo solo lo guarda en pendingFile
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setPendingFile(e.target.files[0]); };
   
   const uploadFile = async (file: File) => { 
       setIsUploading(true); 
@@ -249,7 +257,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       finally { 
           setIsUploading(false); 
           if(fileInputRef.current) fileInputRef.current.value = ''; 
-          // Si subimos archivo manual, desactivamos la IA
           if (isAiActive) handleStopAI();
       } 
   };
@@ -272,26 +279,20 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Solo desactivar si sale del contenedor principal
     if (e.currentTarget === e.target) {
       setIsDragging(false);
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
-      // Pequeña validación
-      if (file.size > 25 * 1024 * 1024) { // 25MB
-         alert("Archivo demasiado grande (Max 25MB)");
-         return;
-      }
-      await uploadFile(file);
+      if (file.size > 25 * 1024 * 1024) { alert("Archivo demasiado grande (Max 25MB)"); return; }
+      setPendingFile(file); // SOLO GUARDAMOS, NO ENVIAMOS
     }
   };
 
@@ -398,7 +399,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           >
             {/* OVERLAY DE DRAG & DROP */}
             {isDragging && (
-                <div className="absolute inset-0 bg-blue-50/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center border-4 border-blue-400 border-dashed m-4 rounded-3xl animate-in zoom-in-95">
+                <div className="absolute inset-0 bg-blue-50/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center border-4 border-blue-400 border-dashed m-4 rounded-3xl animate-in zoom-in-95 pointer-events-none">
                     <UploadCloud size={64} className="text-blue-500 mb-4 animate-bounce" />
                     <h3 className="text-2xl font-bold text-slate-700">Suelta para subir archivo</h3>
                     <p className="text-slate-500">Imágenes, Documentos, Audio...</p>
@@ -423,13 +424,38 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
           
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'} ${isAiActive ? 'border-t-4 border-purple-500 bg-purple-50' : ''}`}>
             
-            {/* PREVISUALIZACIÓN SHORTCUT */}
+            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
             {matchingQR && (
                 <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
                     <Zap className="w-4 h-4 fill-current" />
                     <span className="font-bold">Atajo detectado:</span>
                     <span className="truncate flex-1 italic font-medium">{matchingQR.content}</span>
                     <span className="text-[10px] opacity-70 whitespace-nowrap">(Se enviará este texto)</span>
+                </div>
+            )}
+            
+            {/* PANEL DE PREVISUALIZACIÓN DE ARCHIVO (NUEVO) */}
+            {pendingFile && (
+                <div className="absolute bottom-full left-0 w-full bg-slate-100 border-t border-slate-200 p-3 flex items-center justify-between z-20 animate-in slide-in-from-bottom-2 shadow-sm">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 text-blue-500">
+                            {pendingFile.type.startsWith('image') ? <ImageIcon size={20}/> : <FileText size={20}/>}
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-700 truncate">{pendingFile.name}</p>
+                            <p className="text-[10px] text-slate-400">{(pendingFile.size / 1024 / 1024).toFixed(2)} MB • Listo para enviar</p>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={() => { 
+                            setPendingFile(null); 
+                            if(fileInputRef.current) fileInputRef.current.value=''; 
+                        }} 
+                        className="p-1.5 hover:bg-slate-200 rounded-full text-slate-500 transition"
+                        title="Cancelar subida"
+                    >
+                        <X size={16}/>
+                    </button>
                 </div>
             )}
 
@@ -442,7 +468,15 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
             <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2 rounded-full text-slate-500 hover:bg-slate-200 transition" title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
+              <button 
+                type="button" 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={isUploading} 
+                className={`p-2 rounded-full transition ${pendingFile ? 'text-blue-600 bg-blue-100' : 'text-slate-500 hover:bg-slate-200'}`} 
+                title="Adjuntar"
+              >
+                <Paperclip className="w-5 h-5" />
+              </button>
               
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
 
@@ -468,10 +502,23 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 
-              <input type="text" value={input} onChange={handleInputChange} placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : (isInternalMode ? "Escribe una nota interna (solo equipo)..." : "Mensaje")} disabled={isUploading || isRecording} className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none focus:border-blue-300 text-sm transition-colors ${isInternalMode ? 'bg-yellow-100 border-yellow-300 placeholder-yellow-600/50 text-yellow-900' : 'bg-slate-50 border-slate-200'}`} />
+              <input 
+                type="text" 
+                value={input} 
+                onChange={handleInputChange} 
+                placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : (isInternalMode ? "Escribe una nota interna (solo equipo)..." : (pendingFile ? "Añadir comentario (opcional)..." : "Mensaje"))} 
+                disabled={isUploading || isRecording} 
+                className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none focus:border-blue-300 text-sm transition-colors ${isInternalMode ? 'bg-yellow-100 border-yellow-300 placeholder-yellow-600/50 text-yellow-900' : 'bg-slate-50 border-slate-200'}`} 
+              />
               
               <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
-              {input.trim() ? <button type="submit" disabled={isUploading} className={`p-3 text-white rounded-full hover:shadow-md transition shadow-sm ${isInternalMode ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'}`}><Send className="w-5 h-5" /></button> : <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'}`} title="Grabar"><Mic className="w-5 h-5" /></button>}
+              
+              {/* BOTÓN ENVIAR INTELIGENTE */}
+              {(input.trim() || pendingFile) ? (
+                <button type="submit" disabled={isUploading} className={`p-3 text-white rounded-full hover:shadow-md transition shadow-sm ${isInternalMode ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'}`}><Send className="w-5 h-5" /></button>
+              ) : (
+                <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'}`} title="Grabar"><Mic className="w-5 h-5" /></button>
+              )}
             </form>
           </div>
       </div>
@@ -485,7 +532,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                       <h2 className="text-lg font-bold text-slate-800 text-center">{name || "Sin nombre"}</h2>
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
-                  <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Etiquetas</label><div className="flex flex-wrap gap-2">{config?.tags?.map(tag => { const isActive = contactTags.includes(tag); return (<button key={tag} onClick={() => toggleTag(tag)} className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${isActive ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-orange-200 hover:text-orange-600'}`}>{isActive ? '✓ ' : '+ '}{tag}</button>) })}{(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic">No hay etiquetas configuradas.</p>}</div></div>
                   <div className="space-y-4">
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><Mail className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} /></div></div>
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><MapPin className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/></div></div>
