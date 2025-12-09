@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Laura v9 (Regex Fix)...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Laura v10 (Slots Hidden + Anti-FakeID)...");
 dotenv.config();
 
 const app = express();
@@ -18,7 +18,7 @@ app.use(express.json());
 
 // RUTA "PING"
 app.get('/', (req, res) => {
-  res.send('🤖 Servidor Chatgorithm (Laura v9) funcionando correctamente 🚀');
+  res.send('🤖 Servidor Chatgorithm (Laura v10) funcionando correctamente 🚀');
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -60,22 +60,18 @@ const io = new Server(httpServer, {
 const onlineUsers = new Map<string, string>();
 const activeAiChats = new Set<string>();
 
-// ✅ NUEVO: guardamos los IDs reales ofrecidos por cliente
-const lastOfferedAppointments = new Map<string, string[]>();
-
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
+
+// ✅ NUEVO: guardamos los últimos huecos ofrecidos por teléfono (interno)
+const lastSlotsByPhone = new Map<string, { id: string; human: string; dateISO: string }[]>();
 
 // ==========================================
 //  HERRAMIENTAS DE LA IA (TOOLS)
 // ==========================================
 
-/**
- * ✅ MODIFICADO:
- * - acepta forPhone opcional
- * - guarda IDs ofrecidos para ese cliente
- */
-async function getAvailableAppointments(forPhone?: string) {
-    if (!base) return "Error: Base de datos no conectada";
+async function getAvailableAppointments(contactPhone?: string) {
+    if (!base) return { error: "DB not connected" };
+
     try {
         console.log("🔍 IA solicitando agenda...");
         const records = await base('Appointments').select({
@@ -89,36 +85,39 @@ async function getAvailableAppointments(forPhone?: string) {
             .filter(r => new Date(r.get('Date') as string) > now)
             .slice(0, 15);
 
-        if (validRecords.length === 0) return "No hay citas disponibles. Pide al cliente otra fecha.";
-
-        // ✅ Guardamos IDs reales ofrecidos a este cliente
-        if (forPhone) {
-            lastOfferedAppointments.set(
-                cleanNumber(forPhone),
-                validRecords.map(r => r.id)
-            );
+        if (validRecords.length === 0) {
+            const empty: any[] = [];
+            if (contactPhone) lastSlotsByPhone.set(cleanNumber(contactPhone), empty);
+            return { slots: empty };
         }
-
-        return validRecords.map(r => {
+        
+        const slots = validRecords.map(r => {
             const date = new Date(r.get('Date') as string);
-            const humanDate = date.toLocaleString('es-ES', { 
+            const human = date.toLocaleString('es-ES', { 
                 timeZone: 'Europe/Madrid',
-                weekday: 'long', day: 'numeric', month: 'long',
-                hour: '2-digit', minute: '2-digit'
+                weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
             });
-            return `${r.id} (${humanDate})`;
-        }).join("\n");
+            return {
+                id: r.id,
+                human,
+                dateISO: date.toISOString()
+            };
+        });
+
+        if (contactPhone) lastSlotsByPhone.set(cleanNumber(contactPhone), slots);
+
+        return { slots };
 
     } catch (error: any) {
         console.error("Error leyendo citas:", error);
-        return "Error técnico al leer la agenda.";
+        return { error: "Error técnico al leer la agenda." };
     }
 }
 
 async function bookAppointment(appointmentId: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
     
-    // --- LIMPIEZA INTELIGENTE (REGEX) ---
+    // Buscamos el patrón de ID de Airtable: empieza por 'rec' seguido de alfanuméricos
     const idMatch = appointmentId.match(/(rec[a-zA-Z0-9]+)/);
     const cleanId = idMatch ? idMatch[0] : appointmentId.trim();
     
@@ -127,24 +126,34 @@ async function bookAppointment(appointmentId: string, clientPhone: string, clien
     try {
         try {
             const record = await base('Appointments').find(cleanId);
-            if (record.get('Status') !== 'Available') return "❌ Esa hora ya ha sido reservada por otra persona. Pide elegir otra.";
+            if (record.get('Status') !== 'Available') {
+                return "❌ Esa hora ya ha sido reservada por otra persona. Pide elegir otra.";
+            }
             
             const dateVal = new Date(record.get('Date') as string);
-            const humanDate = dateVal.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'full', timeStyle: 'short' });
+            const humanDate = dateVal.toLocaleString('es-ES', { 
+                timeZone: 'Europe/Madrid', 
+                dateStyle: 'full', 
+                timeStyle: 'short' 
+            });
 
             await base('Appointments').update([{ 
                 id: cleanId, 
-                fields: { "Status": "Booked", "ClientPhone": clientPhone, "ClientName": clientName } 
+                fields: { 
+                    "Status": "Booked", 
+                    "ClientPhone": clientPhone, 
+                    "ClientName": clientName 
+                } 
             }]);
             
             activeAiChats.delete(cleanNumber(clientPhone));
             io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
             
-            return `✅ ÉXITO: Cita confirmada para el ${humanDate}. DÍSELO AL CLIENTE.`;
+            return `✅ ÉXITO: Cita confirmada para el ${humanDate}.`;
 
         } catch (findError) {
             console.error("ID no encontrado en Airtable:", cleanId);
-            return "❌ Error: El ID de la cita no es válido. Vuelve a consultar la lista 'get_available_appointments'.";
+            return "❌ Error: El ID de la cita no es válido.";
         }
     } catch (e: any) { 
         console.error("Error técnico reservando:", e);
@@ -214,36 +223,37 @@ async function processAI(text: string, contactPhone: string, contactName: string
         });
 
         const messages = [
-            { role: "system", content: `Eres "Laura", asistente de reservas de Chatgorithm para un concesionario.
+            { role: "system", content: `
+Eres "Laura", asistente de citas de Chatgorithm para un concesionario.
 
-REGLAS ABSOLUTAS (no las rompas):
-1) Para ver huecos: SIEMPRE llama a la tool get_available_appointments antes de ofrecer horarios.
-2) La lista de huecos viene en líneas con este formato exacto:
-   recXXXXXXXXXXXX (día hora)
-   SOLO esos IDs existen.
-3) Para reservar: SIEMPRE pide al cliente confirmación explícita de día y hora antes de reservar.
-   - Ejemplo: "Confirmo: jueves 11 a las 10:00, ¿te lo reservo?"
-4) Solo puedes reservar llamando a la tool book_appointment con appointmentId EXACTO (empieza por "rec").
-   - En la llamada NO pongas fecha ni texto extra. Solo el ID.
-   - Ejemplo correcto de argumentos:
-     {"appointmentId":"recABC123..."}
-4.5) Si el cliente dice una fecha/hora en lenguaje natural (ej: "mañana a las 12"),
-     NO reserves. Primero muestra huecos reales y haz que elija un ID.
-5) Si el cliente no elige un hueco exacto de la lista, no reserves. Vuelve a mostrar lista o pregunta.
-6) Si la tool book_appointment devuelve error de disponibilidad o ID:
-   - pide otra elección al cliente
-   - vuelve a mostrar huecos con get_available_appointments.
-7) Si el cliente pregunta por ventas o taller:
-   - no inventes respuestas técnicas largas
-   - deriva con assign_department (Ventas/Taller/Admin) y despídete cordialmente.
-8) Estilo: profesional, claro, amable, SIN emojis y sin jerga técnica.
-9) Zona horaria: Europe/Madrid. Fechas relativas ("mañana", "este jueves") interprétalas con esa zona.
+PRIORIDAD ABSOLUTA:
+- Si el cliente menciona cita, hora, día, traer el coche, revisión, taller, reserva, disponibilidad, "mañana", "esta semana", etc.,
+  tu objetivo ES agendar cita. NO derives a Taller/Ventas todavía.
+
+REGLAS:
+1) Para mostrar huecos: SIEMPRE llama a get_available_appointments antes de ofrecer horas.
+2) Cuando se muestren huecos, el cliente verá una lista numerada (sin IDs).
+   Tú debes referirte a los huecos por número: "1)", "2)", "3)", etc.
+3) Para reservar:
+   - El cliente debe confirmar un número de hueco o una fecha/hora que coincida claramente con un hueco.
+   - Si dice algo ambiguo, pregunta.
+4) Horas:
+   - Si el cliente dice "a las 2" o "a las 3" y NO dice "de la mañana",
+     interprétalo como 14:00 o 15:00.
+   - Si dice "a las 2 de la mañana" => 02:00.
+   - Si hay duda, pregunta.
+5) Solo puedes reservar llamando a book_appointment con un appointmentId de la lista interna.
+   Nunca inventes IDs.
+6) Si el cliente habla de ventas o dudas mecánicas SIN querer cita:
+   deriva con assign_department (Ventas/Taller/Admin).
+7) Estilo: profesional, claro, amable, SIN emojis.
 
 OBJETIVO:
-- Guiar al cliente hasta elegir un hueco disponible de la lista.
-- Confirmarlo con el cliente.
-- Reservarlo con tool.
-- Confirmarlo al cliente con fecha/hora humana.
+- Mostrar huecos.
+- Conseguir que elija un número.
+- Confirmar con el cliente.
+- Reservar.
+- Confirmar fecha final.
 
 HOY ES: ${now}.
 ` },
@@ -259,18 +269,18 @@ HOY ES: ${now}.
                     type: "function",
                     function: {
                         name: "get_available_appointments",
-                        description: "Ver lista de huecos libres (ID y Fecha)."
+                        description: "Ver lista interna de huecos libres (NO mostrar IDs al cliente)."
                     }
                 },
                 {
                     type: "function",
                     function: {
                         name: "book_appointment",
-                        description: "Reserva UNA cita. SOLO acepta appointmentId exacto que empieza por rec. NO incluyas fecha ni texto.",
+                        description: "Reserva UNA cita. SOLO acepta appointmentId exacto rec... de la lista interna.",
                         parameters: {
                             type: "object",
                             properties: {
-                                appointmentId: { type: "string", description: "ID exacto rec... de la lista." }
+                                appointmentId: { type: "string", description: "ID exacto rec... de la lista interna." }
                             },
                             required: ["appointmentId"]
                         }
@@ -309,25 +319,20 @@ HOY ES: ${now}.
             const fnName = toolCall.function.name;
             // @ts-ignore
             const args = JSON.parse(toolCall.function.arguments);
-            let toolResult = "";
+            let toolResult: any = "";
 
             console.log(`⚙️ IA Tool: ${fnName}`, args);
 
             if (fnName === "get_available_appointments") {
-                // ✅ guardamos IDs reales ofrecidos
                 toolResult = await getAvailableAppointments(contactPhone);
 
             } else if (fnName === "book_appointment") {
+                // ✅ VALIDACIÓN ANTI-ID INVENTADA
+                const slots = lastSlotsByPhone.get(cleanNumber(contactPhone)) || [];
+                const validIds = new Set(slots.map(s => s.id));
 
-                const phoneKey = cleanNumber(contactPhone);
-                const offered = lastOfferedAppointments.get(phoneKey) || [];
-
-                // ✅ BLOQUEO DURO
-                if (!offered.includes(args.appointmentId)) {
-                    toolResult =
-                        "❌ ID inválido o no ofrecido al cliente. " +
-                        "Debes llamar primero a get_available_appointments, " +
-                        "mostrar la lista y pedir que el cliente elija un ID exacto (rec...).";
+                if (!args.appointmentId || !validIds.has(args.appointmentId)) {
+                    toolResult = "INVALID_ID";
                 } else {
                     toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
                 }
@@ -344,11 +349,34 @@ HOY ES: ${now}.
                 messages: [
                     ...messages,
                     msg,
-                    { role: "tool", tool_call_id: toolCall.id, content: toolResult }
+                    { role: "tool", tool_call_id: toolCall.id, content: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult) }
                 ] as any
             });
-            
-            const finalReply = secondResponse.choices[0].message.content;
+
+            let finalReply = secondResponse.choices[0].message.content || "";
+
+            // ✅ FORMATEO DE HUECOS SIN IDs AL CLIENTE
+            if (fnName === "get_available_appointments") {
+                const slots = toolResult?.slots || [];
+                if (slots.length === 0) {
+                    finalReply = "Ahora mismo no hay citas disponibles. ¿Te va bien que te proponga otra fecha?";
+                } else {
+                    const list = slots.map((s:any, i:number) => `${i+1}) ${s.human}`).join("\n");
+                    finalReply = `Estos son los huecos disponibles:\n${list}\n\nDime el número que prefieres.`;
+                }
+            }
+
+            // ✅ SI LA IA INTENTA RESERVAR CON ID INVENTADA
+            if (fnName === "book_appointment" && toolResult === "INVALID_ID") {
+                const slots = lastSlotsByPhone.get(cleanNumber(contactPhone)) || [];
+                if (slots.length === 0) {
+                    finalReply = "No tengo huecos disponibles ahora mismo. ¿Quieres que busque otras fechas?";
+                } else {
+                    const list = slots.map((s:any, i:number) => `${i+1}) ${s.human}`).join("\n");
+                    finalReply = `Esa hora no coincide con un hueco disponible.\n\nHuecos actuales:\n${list}\n\nDime el número exacto para reservar.`;
+                }
+            }
+
             if (finalReply) await sendWhatsAppText(contactPhone, finalReply);
 
         } else if (msg.content) {
@@ -381,9 +409,9 @@ async function sendWhatsAppText(to: string, body: string) {
 //  WEBHOOKS
 // ==========================================
 app.get('/webhook', (req, res) => {
-    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken)
+    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) {
         res.status(200).send(req.query['hub.challenge']);
-    else res.sendStatus(403);
+    } else res.sendStatus(403);
 });
 
 app.post('/webhook', async (req, res) => {
@@ -401,25 +429,21 @@ app.post('/webhook', async (req, res) => {
         console.log(`📩 Mensaje de ${from}: ${text}`);
 
         const contactRecord = await handleContactUpdate(
-            from,
-            text,
+            from, 
+            text, 
             body.entry[0].changes[0].value.contacts?.[0]?.profile?.name
         );
 
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type: 'text' });
 
-        // ✅ MODIFICADO: shouldAI robusto
-        const shouldAI =
-          msg.type === "text" &&
-          (
-            activeAiChats.has(cleanFrom) ||
-            (contactRecord &&
-             contactRecord.get('status') === 'Nuevo' &&
-             !contactRecord.get('assigned_to'))
-          );
-
-        if (shouldAI) {
-          processAI(text, from, contactRecord?.get('name') as string || "Cliente");
+        if (activeAiChats.has(cleanFrom) && msg.type === 'text') {
+             processAI(text, from, contactRecord?.get('name') as string || "Cliente");
+        } else if (contactRecord && msg.type === 'text') {
+             const status = contactRecord.get('status');
+             const assigned = contactRecord.get('assigned_to');
+             if (status === 'Nuevo' && !assigned) {
+                 processAI(text, from, contactRecord.get('name') as string || "Cliente");
+             }
         }
     }
     
@@ -429,19 +453,14 @@ app.post('/webhook', async (req, res) => {
         const newStatus = event.event; 
         if (base) {
             try {
-                const records = await base(TABLE_TEMPLATES).select({
-                    filterByFormula: `{MetaId} = '${metaId}'`
-                }).firstPage();
-                if (records.length > 0)
-                    await base(TABLE_TEMPLATES).update([{ id: records[0].id, fields: { "Status": newStatus } }]);
+                const records = await base(TABLE_TEMPLATES).select({ filterByFormula: `{MetaId} = '${metaId}'` }).firstPage();
+                if (records.length > 0) await base(TABLE_TEMPLATES).update([{ id: records[0].id, fields: { "Status": newStatus } }]);
             } catch(e) { console.error("Error status plantilla:", e); }
         }
     }
 
     res.sendStatus(200);
-  } catch (e) {
-    res.sendStatus(500);
-  }
+  } catch (e) { res.sendStatus(500); }
 });
 
 // ==========================================
@@ -522,8 +541,10 @@ app.put('/api/appointments/:id', async (req, res) => {
 
 app.delete('/api/appointments/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
-    try { await base('Appointments').destroy([req.params.id]); res.json({ success: true }); }
-    catch(e) { res.status(400).json({error: "Error deleting"}); }
+    try {
+        await base('Appointments').destroy([req.params.id]);
+        res.json({ success: true });
+    } catch(e) { res.status(400).json({error: "Error deleting"}); }
 });
 
 // RESTO RUTAS
@@ -549,12 +570,10 @@ app.post('/api/create-template', async (req, res) => {
         if (waToken && waBusinessId) {
             try {
                 const metaPayload: any = {
-                    name,
-                    category,
-                    allow_category_change: true,
-                    language,
+                    name, category, allow_category_change: true, language,
                     components: [{ type: "BODY", text: body }]
                 };
+
                 if (footer) metaPayload.components.push({ type: "FOOTER", text: footer });
 
                 const metaRes = await axios.post(
@@ -584,7 +603,11 @@ app.post('/api/create-template', async (req, res) => {
 
         res.json({
             success: true,
-            template: { id: createdRecords[0].id, name, category, language, body, footer, status, variableMapping: variableExamples }
+            template: {
+                id: createdRecords[0].id,
+                name, category, language, body, footer, status,
+                variableMapping: variableExamples
+            }
         });
     } catch (error: any) {
         res.status(400).json({ success: false, error: error.message });
@@ -593,8 +616,12 @@ app.post('/api/create-template', async (req, res) => {
 
 app.delete('/api/delete-template/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
-    try { await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({ success: true }); }
-    catch (error: any) { res.status(500).json({ error: "Error" }); }
+    try {
+        await base(TABLE_TEMPLATES).destroy([req.params.id]);
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: "Error" });
+    }
 });
 
 app.post('/api/send-template', async (req, res) => {
@@ -695,9 +722,8 @@ app.get('/api/analytics', async (req, res) => {
             agents: agentPerformance,
             statuses: statusDistribution
         });
-    } catch (e) {
-        res.status(500).json({ error: "Error" });
-    }
+
+    } catch (e) { res.status(500).json({ error: "Error" }); }
 });
 
 app.get('/api/media/:id', async (req, res) => {
@@ -707,23 +733,20 @@ app.get('/api/media/:id', async (req, res) => {
             `https://graph.facebook.com/v17.0/${req.params.id}`,
             { headers: { 'Authorization': `Bearer ${waToken}` } }
         );
-
-        const mediaRes = await axios.get(urlRes.data.url, {
-            headers: { 'Authorization': `Bearer ${waToken}` },
-            responseType: 'stream'
-        });
-
+        const mediaRes = await axios.get(
+            urlRes.data.url,
+            { headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream' }
+        );
         res.setHeader('Content-Type', mediaRes.headers['content-type']);
         mediaRes.data.pipe(res);
-    } catch (e) {
-        res.sendStatus(404);
-    }
+    } catch (e) { res.sendStatus(404); }
 });
 
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
     try {
         const file = req.file;
         const { targetPhone, senderName } = req.body;
+
         if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" });
 
         const formData = new FormData();
@@ -737,6 +760,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
         );
 
         const mediaId = uploadRes.data.id;
+
         let msgType = 'document';
         if (file.mimetype.startsWith('image')) msgType = 'image';
         else if (file.mimetype.startsWith('audio')) msgType = 'audio';
@@ -767,6 +791,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
 
         await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`);
         res.json({ success: true });
+
     } catch (error: any) {
         res.status(500).json({ error: "Error subiendo archivo" });
     }
@@ -776,6 +801,7 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
 async function handleContactUpdate(phone: string, text: string, profileName?: string) {
     if (!base) return null;
     const clean = cleanNumber(phone);
+
     try {
         const contacts = await base('Contacts').select({
             filterByFormula: `{phone} = '${clean}'`,
@@ -785,7 +811,10 @@ async function handleContactUpdate(phone: string, text: string, profileName?: st
         if (contacts.length > 0) {
             await base('Contacts').update([{
                 id: contacts[0].id,
-                fields: { "last_message": text, "last_message_time": new Date().toISOString() }
+                fields: {
+                    "last_message": text,
+                    "last_message_time": new Date().toISOString()
+                }
             }]);
             return contacts[0];
         } else {
@@ -821,41 +850,249 @@ async function saveAndEmitMessage(msg: any) {
                     "media_id": msg.mediaId || ""
                 }
             }], { typecast: true });
-        } catch (e) { console.error("Error guardando:", e); }
+        } catch (e) {
+            console.error("Error guardando:", e);
+        }
     }
 }
 
 io.on('connection', (socket) => {
-  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('Name'), type: x.get('Type') }))); } });
-  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
-  socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Eliminado'); } });
-  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Actualizado'); } });
+  socket.on('request_config', async () => {
+    if (base) {
+      const r = await base('Config').select().all();
+      socket.emit('config_list', r.map(x => ({
+        id: x.id,
+        name: x.get('Name'),
+        type: x.get('Type')
+      })));
+    }
+  });
+
+  socket.on('add_config', async (data) => {
+    if (base) {
+      await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]);
+      io.emit('config_list', (await base('Config').select().all()).map(r => ({
+        id: r.id,
+        name: r.get('name'),
+        type: r.get('type')
+      })));
+      socket.emit('action_success', 'Añadido correctamente');
+    }
+  });
+
+  socket.on('delete_config', async (id) => {
+    if (base) {
+      await base('Config').destroy([id]);
+      io.emit('config_list', (await base('Config').select().all()).map(r => ({
+        id: r.id,
+        name: r.get('name'),
+        type: r.get('type')
+      })));
+      socket.emit('action_success', 'Eliminado correctamente');
+    }
+  });
+
+  socket.on('update_config', async (d) => {
+    if (base) {
+      await base('Config').update([{ id: d.id, fields: { "name": d.name } }]);
+      io.emit('config_list', (await base('Config').select().all()).map(r => ({
+        id: r.id,
+        name: r.get('name'),
+        type: r.get('type')
+      })));
+      socket.emit('action_success', 'Actualizado correctamente');
+    }
+  });
 
   // Quick Replies
-  socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
-  socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
-  socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
-  socket.on('update_quick_reply', async (d) => { if (base) { await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
+  socket.on('request_quick_replies', async () => {
+    if (base) {
+      const r = await base('QuickReplies').select().all();
+      socket.emit('quick_replies_list', r.map(x => ({
+        id: x.id,
+        title: x.get('Title'),
+        content: x.get('Content'),
+        shortcut: x.get('Shortcut')
+      })));
+    }
+  });
 
-  socket.on('request_agents', async () => { if (base) { const r = await base('Agents').select().all(); socket.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); } });
-  socket.on('login_attempt', async (data) => { if(!base) return; const r = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (r.length > 0) { const pwd = r[0].get('password'); if (!pwd || String(pwd).trim() === "") socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else if (String(pwd) === String(data.password)) socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else socket.emit('login_error', 'Contraseña incorrecta'); } else socket.emit('login_error', 'Usuario no encontrado'); });
+  socket.on('add_quick_reply', async (d) => {
+    if (base) {
+      await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]);
+      const r = await base('QuickReplies').select().all();
+      io.emit('quick_replies_list', r.map(x => ({
+        id: x.id,
+        title: x.get('Title'),
+        content: x.get('Content'),
+        shortcut: x.get('Shortcut')
+      })));
+    }
+  });
 
-  socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
-  socket.on('delete_agent', async (d) => { if (!base) return; await base('Agents').destroy([d.agentId]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Eliminado'); });
-  socket.on('update_agent', async (d) => { if (!base) return; const f: any = { "name": d.updates.name, "role": d.updates.role }; if (d.updates.password !== undefined) f["password"] = d.updates.password; await base('Agents').update([{ id: d.agentId, fields: f }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Actualizado'); });
+  socket.on('delete_quick_reply', async (id) => {
+    if (base) {
+      await base('QuickReplies').destroy([id]);
+      const r = await base('QuickReplies').select().all();
+      io.emit('quick_replies_list', r.map(x => ({
+        id: x.id,
+        title: x.get('Title'),
+        content: x.get('Content'),
+        shortcut: x.get('Shortcut')
+      })));
+    }
+  });
 
-  socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [] }))); } });
+  socket.on('update_quick_reply', async (d) => {
+    if (base) {
+      await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]);
+      const r = await base('QuickReplies').select().all();
+      io.emit('quick_replies_list', r.map(x => ({
+        id: x.id,
+        title: x.get('Title'),
+        content: x.get('Content'),
+        shortcut: x.get('Shortcut')
+      })));
+    }
+  });
 
-  socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
+  socket.on('request_agents', async () => {
+    if (base) {
+      const r = await base('Agents').select().all();
+      socket.emit('agents_list', r.map(x => ({
+        id: x.id,
+        name: x.get('name'),
+        role: x.get('role'),
+        hasPassword: !!x.get('password')
+      })));
+    }
+  });
 
-  socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
+  socket.on('login_attempt', async (data) => {
+    if(!base) return;
+    const r = await base('Agents').select({
+      filterByFormula: `{name} = '${data.name}'`,
+      maxRecords: 1
+    }).firstPage();
+
+    if (r.length > 0) {
+      const pwd = r[0].get('password');
+      if (!pwd || String(pwd).trim() === "") {
+        socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') });
+      } else if (String(pwd) === String(data.password)) {
+        socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') });
+      } else socket.emit('login_error', 'Contraseña incorrecta');
+    } else socket.emit('login_error', 'Usuario no encontrado');
+  });
+
+  socket.on('create_agent', async (d) => {
+    if (!base) return;
+    await base('Agents').create([{ fields: {
+      "name": d.newAgent.name,
+      "role": d.newAgent.role,
+      "password": d.newAgent.password || ""
+    }}]);
+
+    const r = await base('Agents').select().all();
+    io.emit('agents_list', r.map(x => ({
+      id: x.id,
+      name: x.get('name'),
+      role: x.get('role'),
+      hasPassword: !!x.get('password')
+    })));
+    socket.emit('action_success', 'Creado');
+  });
+
+  socket.on('delete_agent', async (d) => {
+    if (!base) return;
+    await base('Agents').destroy([d.agentId]);
+    const r = await base('Agents').select().all();
+    io.emit('agents_list', r.map(x => ({
+      id: x.id,
+      name: x.get('name'),
+      role: x.get('role'),
+      hasPassword: !!x.get('password')
+    })));
+    socket.emit('action_success', 'Eliminado');
+  });
+
+  socket.on('update_agent', async (d) => {
+    if (!base) return;
+    const f: any = { "name": d.updates.name, "role": d.updates.role };
+    if (d.updates.password !== undefined) f["password"] = d.updates.password;
+
+    await base('Agents').update([{ id: d.agentId, fields: f }]);
+    const r = await base('Agents').select().all();
+    io.emit('agents_list', r.map(x => ({
+      id: x.id,
+      name: x.get('name'),
+      role: x.get('role'),
+      hasPassword: !!x.get('password')
+    })));
+    socket.emit('action_success', 'Actualizado');
+  });
+
+  socket.on('request_contacts', async () => {
+    if (base) {
+      const r = await base('Contacts').select({
+        sort: [{ field: "last_message_time", direction: "desc" }]
+      }).all();
+
+      socket.emit('contacts_update', r.map(x => ({
+        id: x.id,
+        phone: x.get('phone'),
+        name: x.get('name'),
+        status: x.get('status'),
+        department: x.get('department'),
+        assigned_to: x.get('assigned_to'),
+        last_message: x.get('last_message'),
+        last_message_time: x.get('last_message_time'),
+        avatar: (x.get('avatar') as any[])?.[0]?.url,
+        tags: x.get('tags') || []
+      })));
+    }
+  });
+
+  socket.on('request_conversation', async (p) => {
+    if (base) {
+      const c = cleanNumber(p);
+      const r = await base('Messages').select({
+        filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`,
+        sort: [{ field: "timestamp", direction: "asc" }]
+      }).all();
+
+      socket.emit('conversation_history', r.map(x => ({
+        text: x.get('text'),
+        sender: x.get('sender'),
+        timestamp: x.get('timestamp'),
+        type: x.get('type'),
+        mediaId: x.get('media_id')
+      })));
+    }
+  });
+
+  socket.on('update_contact_info', async (data) => {
+    if(base) {
+      const clean = cleanNumber(data.phone);
+      const r = await base('Contacts').select({
+        filterByFormula: `{phone} = '${clean}'`
+      }).firstPage();
+
+      if (r.length > 0) {
+        await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true });
+        io.emit('contact_updated_notification');
+      }
+    }
+  });
   
   socket.on('chatMessage', async (msg) => {
     const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE);
+
     if (waToken && waPhoneId) {
       try {
         if (msg.type !== 'note') {
-          await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`,
+          await axios.post(
+            `https://graph.facebook.com/v17.0/${waPhoneId}/messages`,
             { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } },
             { headers: { Authorization: `Bearer ${waToken}` } }
           );
@@ -876,7 +1113,6 @@ io.on('connection', (socket) => {
           : `Tú (${msg.sender}): ${msg.text}`;
 
         await handleContactUpdate(targetPhone, previewText);
-
       } catch (error: any) {
         console.error("Error envío:", error.message);
       }
@@ -887,14 +1123,14 @@ io.on('connection', (socket) => {
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;
     console.log(`🤖 Trigger Manual IA para ${phone}`);
-    let name = "Cliente";
 
+    let name = "Cliente";
     if (base) {
         activeAiChats.add(cleanNumber(phone));
         io.emit('ai_active_change', { phone: cleanNumber(phone), active: true });
         
         const records = await base('Contacts').select({
-          filterByFormula: `{phone} = '${cleanNumber(phone)}'`
+            filterByFormula: `{phone} = '${cleanNumber(phone)}'`
         }).firstPage();
 
         if (records.length > 0) name = (records[0].get('name') as string) || "Cliente";
@@ -929,7 +1165,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('typing', (d) => { socket.broadcast.emit('remote_typing', d); });
+  socket.on('typing', (d) => {
+    socket.broadcast.emit('remote_typing', d);
+  });
 });
 
 httpServer.listen(PORT, () => {
