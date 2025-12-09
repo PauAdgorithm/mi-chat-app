@@ -10,8 +10,7 @@ import {
   ChevronDown, 
   X, 
   Hash,
-  CheckCircle,
-  Calendar as CalendarIcon 
+  CheckCircle 
 } from 'lucide-react';
 
 export interface Contact {
@@ -53,7 +52,8 @@ const normalizePhone = (phone: string) => {
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView }: SidebarProps) {
-  // 1. ESTADOS (MOVIDOS AQUÍ ARRIBA PARA EVITAR EL ERROR DE PANTALLA BLANCA)
+  // 1. DECLARACIÓN DE ESTADOS (PRIMERO DE TODO)
+  // Esto arregla el error de "Cannot access before initialization"
   const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,6 +77,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // 2. EFECTOS (CARGA DE DATOS)
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
@@ -167,18 +168,25 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // --- LÓGICA DE FILTRADO (Ahora segura porque viewScope ya existe) ---
+  // 3. LÓGICA DE FILTRADO (Ahora segura)
   const filteredContacts = contacts.filter(c => {
+      // Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
+      // Pestañas Principales (viewScope ya está definido arriba)
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
+      // Filtros Avanzados
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
-      if (activeFilters.tag && (!c.tags || !c.tags.includes(activeFilters.tag))) return false;
+      
+      // Etiquetas
+      if (activeFilters.tag) {
+          if (!c.tags || !c.tags.includes(activeFilters.tag)) return false;
+      }
 
       return true;
   });
@@ -190,12 +198,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
   const handleFilterClick = (type: FilterType) => {
-      // Compatibilidad con botones antiguos si fuera necesario, 
-      // pero ahora usamos viewScope para las tabs principales.
       if (type === 'all' || type === 'mine' || type === 'unassigned') {
           setViewScope(type as any);
       } else {
-          // Lógica para togglear el panel de filtros si pulsas botones extra
           setShowFilters(true);
       }
   };
@@ -203,6 +208,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
+      {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
@@ -327,9 +333,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                               </span>
                           ))}
                           {contact.tags && contact.tags.length > 2 && <span className="text-[9px] text-slate-400">+{contact.tags.length - 2}</span>}
-                          
-                          {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
-                          {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                       </div>
                     </div>
                   </button>
@@ -340,32 +343,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      <div className="bg-slate-50 border-t border-slate-200 p-3">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+      {onlineUsers.length > 0 && (
+        <div className="bg-slate-50 border-t border-slate-200 p-3">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                Online ({onlineUsers.length})
+                Equipo Online ({onlineUsers.length})
             </h3>
-            <button 
-                onClick={() => setView('calendar')} 
-                className="p-1.5 bg-white border border-slate-200 rounded-md text-slate-400 hover:text-purple-600 hover:border-purple-200 transition shadow-sm"
-                title="Ver Agenda"
-            >
-                <CalendarIcon className="w-4 h-4" />
-            </button>
-          </div>
-            
-          <div className="flex flex-wrap gap-2 mb-2">
-              {onlineUsers.map((agentName, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                      <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
-                          {agentName === user.username ? 'Tú' : agentName}
-                      </span>
-                  </div>
-              ))}
-          </div>
-      </div>
+            <div className="flex flex-wrap gap-2">
+                {onlineUsers.map((agentName, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                        <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
+                            {agentName === user.username ? 'Tú' : agentName}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+      )}
     </div>
   );
 }
