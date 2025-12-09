@@ -212,6 +212,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
             3. Si reservas con éxito, confirma la fecha al cliente.
             4. Si es duda técnica -> Taller. Si es ventas -> Ventas. Usa 'assign_department'.
             5. Tono profesional, amable, sin emojis.
+            6. Reserva correctamente el último horario acordado con el cliente y comprueba la disponibilidad antes de decirsela al cliente.
             ` },
             ...history, 
             { role: "user", content: text } 
