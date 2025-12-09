@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
   Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
   Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap, Bot, StopCircle 
+  LayoutTemplate, Tag, Zap, Bot, StopCircle, UploadCloud // <--- Icono nuevo
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
@@ -85,6 +85,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isSaving, setIsSaving] = useState(false);
   
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
+
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
@@ -93,6 +94,9 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // ESTADOS IA
   const [aiThinking, setAiThinking] = useState(false);
   const [isAiActive, setIsAiActive] = useState(false); 
+  
+  // ESTADO DRAG & DROP (NUEVO)
+  const [isDragging, setIsDragging] = useState(false);
 
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
 
@@ -144,9 +148,10 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     setIsInternalMode(false);
     setShowQuickRepliesList(false);
     
-    // Reset estados IA
+    // Reset estados IA y Drag
     setAiThinking(false);
     setIsAiActive(false);
+    setIsDragging(false);
 
     setShowSearch(false);
     setChatSearchQuery('');
@@ -231,7 +236,24 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) uploadFile(e.target.files[0]); };
-  const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; } };
+  
+  const uploadFile = async (file: File) => { 
+      setIsUploading(true); 
+      const formData = new FormData(); 
+      formData.append('file', file); 
+      formData.append('targetPhone', contact.phone); 
+      formData.append('senderName', user.username); 
+      try { 
+          await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); 
+      } catch (e) { alert("Error envío"); } 
+      finally { 
+          setIsUploading(false); 
+          if(fileInputRef.current) fileInputRef.current.value = ''; 
+          // Si subimos archivo manual, desactivamos la IA
+          if (isAiActive) handleStopAI();
+      } 
+  };
+  
   const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
@@ -239,6 +261,39 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const getDateLabel = (dateString: string) => { const date = new Date(dateString); if (isNaN(date.getTime())) return ""; const today = new Date(); const yesterday = new Date(); yesterday.setDate(today.getDate() - 1); if (date.toDateString() === today.toDateString()) return "Hoy"; if (date.toDateString() === yesterday.toDateString()) return "Ayer"; return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }); };
 
   const insertQuickReply = (content: string) => { setInput(prev => prev + (prev ? ' ' : '') + content); setShowQuickRepliesList(false); };
+
+  // --- LOGICA DRAG & DROP ---
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Solo desactivar si sale del contenedor principal
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      // Pequeña validación
+      if (file.size > 25 * 1024 * 1024) { // 25MB
+         alert("Archivo demasiado grande (Max 25MB)");
+         return;
+      }
+      await uploadFile(file);
+    }
+  };
 
   const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
@@ -334,10 +389,24 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
-          <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc]" onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); setShowQuickRepliesList(false); }}>
+          <div 
+            className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#f2f6fc] relative" 
+            onClick={() => { setShowEmojiPicker(false); setShowAssignMenu(false); setShowTagMenu(false); setShowSearch(false); setShowQuickRepliesList(false); }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {/* OVERLAY DE DRAG & DROP */}
+            {isDragging && (
+                <div className="absolute inset-0 bg-blue-50/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center border-4 border-blue-400 border-dashed m-4 rounded-3xl animate-in zoom-in-95">
+                    <UploadCloud size={64} className="text-blue-500 mb-4 animate-bounce" />
+                    <h3 className="text-2xl font-bold text-slate-700">Suelta para subir archivo</h3>
+                    <p className="text-slate-500">Imágenes, Documentos, Audio...</p>
+                </div>
+            )}
+
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
             {renderedItems}
-            {/* INDICADOR DE QUE LA IA ESTÁ PENSANDO */}
             {aiThinking && (
                 <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
                     <div className="bg-purple-50 text-purple-700 p-3 rounded-xl rounded-tl-none border border-purple-100 shadow-sm flex items-center gap-2">
@@ -348,12 +417,13 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             )}
             <div ref={messagesEndRef} />
           </div>
-
+          
+          {/* ... (Resto del Footer con Inputs) ... */}
           {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
           
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'} ${isAiActive ? 'border-t-4 border-purple-500 bg-purple-50' : ''}`}>
             
-            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
+            {/* PREVISUALIZACIÓN SHORTCUT */}
             {matchingQR && (
                 <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
                     <Zap className="w-4 h-4 fill-current" />
@@ -394,15 +464,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                   )}
               </div>
 
-              {/* BOTÓN MAGIA IA (CAMBIA DE COLOR SI ESTÁ ACTIVO) */}
-              <button 
-                type="button" 
-                onClick={handleTriggerAI} 
-                className={`p-2 rounded-full transition-all ${isAiActive ? 'bg-purple-600 text-white animate-pulse shadow-lg shadow-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`} 
-                title={isAiActive ? "Detener IA" : "Delegar a IA"}
-              >
-                {isAiActive ? <StopCircle className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
-              </button>
+              <button type="button" onClick={handleTriggerAI} className={`p-2 rounded-full transition-all ${isAiActive ? 'bg-purple-600 text-white animate-pulse shadow-lg shadow-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`} title={isAiActive ? "Detener IA" : "Delegar a IA"}>{isAiActive ? <StopCircle className="w-5 h-5" /> : <Bot className="w-5 h-5" />}</button>
 
               <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
 
@@ -416,17 +478,14 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
 
       {showDetailsPanel && (
           <div className="w-80 bg-white border-l border-gray-200 shadow-xl flex flex-col h-full animate-in slide-in-from-right duration-300 shrink-0 z-30">
-              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
-                  <h3 className="font-bold text-slate-700">Detalles del Cliente</h3>
-                  <button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button>
-              </div>
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50"><h3 className="font-bold text-slate-700">Detalles del Cliente</h3><button onClick={() => setShowDetailsPanel(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400"><X className="w-5 h-5"/></button></div>
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
                   <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-3 border-4 border-white shadow-sm">{contact.avatar ? <img src={contact.avatar} className="w-full h-full rounded-full object-cover"/> : <User className="w-10 h-10"/>}</div>
                       <h2 className="text-lg font-bold text-slate-800 text-center">{name || "Sin nombre"}</h2>
                       <p className="text-sm text-slate-500 flex items-center gap-1 mt-1"><Phone className="w-3 h-3"/> {contact.phone}</p>
                   </div>
-
+                  <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Etiquetas</label><div className="flex flex-wrap gap-2">{config?.tags?.map(tag => { const isActive = contactTags.includes(tag); return (<button key={tag} onClick={() => toggleTag(tag)} className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${isActive ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-orange-200 hover:text-orange-600'}`}>{isActive ? '✓ ' : '+ '}{tag}</button>) })}{(!config?.tags || config.tags.length === 0) && <p className="text-xs text-slate-400 italic">No hay etiquetas configuradas.</p>}</div></div>
                   <div className="space-y-4">
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><Mail className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="cliente@email.com" value={crmEmail} onChange={(e) => setCrmEmail(e.target.value)} onBlur={() => updateCRM('email', crmEmail)} /></div></div>
                       <div><label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Dirección</label><div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200"><MapPin className="w-4 h-4 text-slate-400"/><input className="bg-transparent w-full text-sm outline-none text-slate-700 placeholder-slate-400" placeholder="Calle Ejemplo 123" value={crmAddress} onChange={(e) => setCrmAddress(e.target.value)} onBlur={() => updateCRM('address', crmAddress)}/></div></div>
