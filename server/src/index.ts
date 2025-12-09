@@ -9,12 +9,17 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor completo con Agenda...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Persistente...");
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// RUTA "PING" (Para que el Cron Job no falle)
+app.get('/', (req, res) => {
+  res.send('🤖 Servidor Chatgorithm funcionando correctamente 🚀');
+});
 
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
@@ -53,12 +58,13 @@ const io = new Server(httpServer, {
 });
 
 const onlineUsers = new Map<string, string>();
+// MEMORIA DE SESIÓN: Chats donde la IA está activa actualmente
 const activeAiChats = new Set<string>();
 
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 // ==========================================
-//  HERRAMIENTAS IA (AGENDA)
+//  HERRAMIENTAS DE LA IA (TOOLS)
 // ==========================================
 
 async function getAvailableAppointments() {
@@ -72,11 +78,13 @@ async function getAvailableAppointments() {
         
         if (records.length === 0) return "No hay citas disponibles próximamente.";
         
+        // Devolvemos un formato muy claro para que GPT entienda el ID
         return records.map(r => {
             const date = new Date(r.get('Date') as string);
             const humanDate = date.toLocaleString('es-ES', { 
                 weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
             });
+            // Importante: Le damos el ID explícito a la IA
             return `ID: "${r.id}" -- FECHA: ${humanDate}`;
         }).join("\n");
     } catch (error: any) {
@@ -97,8 +105,7 @@ async function bookAppointment(appointmentId: string, clientPhone: string, clien
                 } 
             }
         ]);
-        
-        // Cuando se reserva, la IA termina su trabajo y avisa al frontend
+        // Al reservar, sacamos a la IA de la conversación
         activeAiChats.delete(cleanNumber(clientPhone));
         io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
@@ -115,6 +122,7 @@ async function assignDepartment(clientPhone: string, department: string) {
             await base('Contacts').update([{ id: contacts[0].id, fields: { "department": department, "status": "Abierto" } }]);
             io.emit('contact_updated_notification');
             
+            // Al asignar, la IA también termina su trabajo
             activeAiChats.delete(clean);
             io.emit('ai_active_change', { phone: clean, active: false });
 
@@ -124,12 +132,14 @@ async function assignDepartment(clientPhone: string, department: string) {
     } catch (e) { return "Error asignando departamento."; }
 }
 
+// Nueva herramienta para que la IA decida callarse
 async function stopConversation(phone: string) {
     activeAiChats.delete(cleanNumber(phone));
     io.emit('ai_active_change', { phone: cleanNumber(phone), active: false });
     return "Conversación automática finalizada.";
 }
 
+// RECUPERAR HISTORIAL (MEMORIA)
 async function getChatHistory(phone: string, limit = 10) {
     if (!base) return [];
     try {
@@ -139,9 +149,11 @@ async function getChatHistory(phone: string, limit = 10) {
             maxRecords: limit
         }).all();
 
+        // Convertimos a array y mapeamos
         return [...records].reverse().map((r: any) => {
             const sender = r.get('sender') as string;
-            const role = (sender === 'Bot IA' || sender === 'Agente' || sender.match(/[a-zA-Z]/)) ? "assistant" : "user";
+            // Identificar roles para GPT (Si el sender tiene letras, es un agente o bot)
+            const role = (sender === 'Bot IA' || sender === 'Agente' || /[a-zA-Z]/.test(sender)) ? "assistant" : "user";
             const text = r.get('text') as string;
             return { role, content: text || "" } as any; 
         });
@@ -155,21 +167,28 @@ async function getChatHistory(phone: string, limit = 10) {
 async function processAI(text: string, contactPhone: string, contactName: string) {
     if (!openai || !waToken || !waPhoneId) return;
     
+    // Aseguramos que está en la lista de activos
     activeAiChats.add(cleanNumber(contactPhone));
     io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'thinking' });
+    // Avisamos al frontend que la IA está activa en este chat
     io.emit('ai_active_change', { phone: cleanNumber(contactPhone), active: true });
 
     try {
+        // 1. OBTENER MEMORIA
         const history = await getChatHistory(contactPhone);
 
         const messages = [
             { role: "system", content: `Eres 'ChatBot', el asistente de citas de Chatgorithm.
-            OBJETIVO: Gestionar citas y clasificar clientes.
-            REGLAS:
-            1. Usa SIEMPRE 'get_available_appointments' para ver horas reales. NO inventes.
-            2. Para reservar, usa 'book_appointment' con el ID exacto que te dio la herramienta anterior.
-            3. Si asignas departamento o el cliente se despide, usa 'stop_conversation'.
-            4. Sé breve y profesional.` },
+            
+            OBJETIVO PRINCIPAL: Gestionar citas y clasificar clientes.
+            
+            REGLAS DE ORO:
+            1. NO inventes horas. Usa SIEMPRE 'get_available_appointments' para ver la realidad.
+            2. Cuando ofrezcas horas, sé claro (ej: "Tengo disponible el Lunes a las 10:00").
+            3. Para reservar, necesitas el ID exacto que te devuelve la herramienta. Si el usuario dice "el lunes", busca en la lista que obtuviste qué ID corresponde y úsalo.
+            4. Cuando termines una gestión (cita reservada o departamento asignado), usa 'stop_conversation' o despídete claramente.
+            5. Si el cliente dice "gracias" o se despide, usa 'stop_conversation'.
+            6. Habla español neutro y profesional.` },
             ...history, 
             { role: "user", content: text } 
         ];
@@ -178,10 +197,48 @@ async function processAI(text: string, contactPhone: string, contactName: string
             model: "gpt-4o-mini",
             messages: messages as any,
             tools: [
-                { type: "function", function: { name: "get_available_appointments", description: "Ver horas libres." } },
-                { type: "function", function: { name: "book_appointment", description: "Reservar cita con ID.", parameters: { type: "object", properties: { appointmentId: { type: "string" } }, required: ["appointmentId"] } } },
-                { type: "function", function: { name: "assign_department", description: "Asignar departamento.", parameters: { type: "object", properties: { department: { type: "string", enum: ["Ventas", "Taller", "Admin"] } }, required: ["department"] } } },
-                { type: "function", function: { name: "stop_conversation", description: "Detener bot." } }
+                {
+                    type: "function",
+                    function: {
+                        name: "get_available_appointments",
+                        description: "Consultar lista de fechas/horas libres. Devuelve IDs y Fechas."
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "book_appointment",
+                        description: "Reservar una cita. REQUIERE el ID obtenido previamente.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                appointmentId: { type: "string", description: "El ID exacto (ej: recXXXXX) de la cita" }
+                            },
+                            required: ["appointmentId"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "assign_department",
+                        description: "Derivar a un humano (Ventas/Taller) y terminar.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                department: { type: "string", enum: ["Ventas", "Taller", "Admin"] }
+                            },
+                            required: ["department"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "stop_conversation",
+                        description: "Detener el bot automático (ej: el cliente se despide o no quiere nada)."
+                    }
+                }
             ],
             tool_choice: "auto"
         });
@@ -196,14 +253,23 @@ async function processAI(text: string, contactPhone: string, contactName: string
             const args = JSON.parse(toolCall.function.arguments);
             let toolResult = "";
 
-            if (fnName === "get_available_appointments") toolResult = await getAvailableAppointments();
-            else if (fnName === "book_appointment") toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
-            else if (fnName === "assign_department") toolResult = await assignDepartment(contactPhone, args.department);
-            else if (fnName === "stop_conversation") toolResult = await stopConversation(contactPhone);
+            if (fnName === "get_available_appointments") {
+                toolResult = await getAvailableAppointments();
+            } else if (fnName === "book_appointment") {
+                toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
+            } else if (fnName === "assign_department") {
+                toolResult = await assignDepartment(contactPhone, args.department);
+            } else if (fnName === "stop_conversation") {
+                toolResult = await stopConversation(contactPhone);
+            }
 
             const secondResponse = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
-                messages: [ ...messages, msg, { role: "tool", tool_call_id: toolCall.id, content: toolResult } ] as any
+                messages: [
+                    ...messages,
+                    msg,
+                    { role: "tool", tool_call_id: toolCall.id, content: toolResult }
+                ] as any
             });
             
             const finalReply = secondResponse.choices[0].message.content;
@@ -213,7 +279,11 @@ async function processAI(text: string, contactPhone: string, contactName: string
             await sendWhatsAppText(contactPhone, msg.content);
         }
 
-    } catch (error) { console.error("❌ Error OpenAI:", error); } finally { io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' }); }
+    } catch (error) {
+        console.error("❌ Error OpenAI:", error);
+    } finally {
+        io.emit('ai_status', { phone: cleanNumber(contactPhone), status: 'idle' });
+    }
 }
 
 async function sendWhatsAppText(to: string, body: string) {
@@ -234,32 +304,48 @@ async function sendWhatsAppText(to: string, body: string) {
 // ==========================================
 //  WEBHOOKS
 // ==========================================
-app.get('/webhook', (req, res) => { if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']); else res.sendStatus(403); });
+
+app.get('/webhook', (req, res) => {
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) res.status(200).send(req.query['hub.challenge']);
+  else res.sendStatus(403);
+});
+
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
     if (body.object && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-        const msg = body.entry[0].changes[0].value.messages[0];
-        const from = msg.from; 
+        const value = body.entry[0].changes[0].value;
+        const msgData = value.messages[0];
+        const profileName = value.contacts?.[0]?.profile?.name || "Cliente";
+        const from = msgData.from; 
         const cleanFrom = cleanNumber(from);
         
         let text = "(Media)";
-        if (msg.type === 'text') text = msg.text.body;
+        if (msgData.type === 'text') text = msgData.text.body;
 
         console.log(`📩 Mensaje de ${from}: ${text}`);
 
-        const contactRecord = await handleContactUpdate(from, text, body.entry[0].changes[0].value.contacts?.[0]?.profile?.name);
+        const contactRecord = await handleContactUpdate(from, text, profileName);
         await saveAndEmitMessage({ text, sender: from, timestamp: new Date().toISOString(), type: 'text' });
 
-        if (activeAiChats.has(cleanFrom) && msg.type === 'text') {
-             processAI(text, from, contactRecord?.get('name') as string || "Cliente");
-        } else if (contactRecord && msg.type === 'text') {
+        // LÓGICA DE ACTIVACIÓN MEJORADA (PERSISTENCIA)
+        // 1. Si el chat ya está en modo "IA Activa", la IA responde SIEMPRE.
+        if (activeAiChats.has(cleanFrom) && msgData.type === 'text') {
+             console.log("🤖 IA Activa detectada. Procesando respuesta...");
+             processAI(text, from, profileName);
+        }
+        // 2. Si no, activamos solo si es Nuevo y sin asignar (primer contacto)
+        else if (contactRecord && msgData.type === 'text') {
              const status = contactRecord.get('status');
              const assigned = contactRecord.get('assigned_to');
-             if (status === 'Nuevo' && !assigned) { processAI(text, from, contactRecord.get('name') as string || "Cliente"); }
+             if (status === 'Nuevo' && !assigned) {
+                 console.log("🤖 Nuevo lead detectado. Activando IA...");
+                 processAI(text, from, profileName);
+             }
         }
     }
     
+    // Status updates...
     if (body.object && body.entry?.[0]?.changes?.[0]?.field === 'message_template_status_update') {
         const event = body.entry[0].changes[0].value;
         const metaId = event.message_template_id;
@@ -271,6 +357,7 @@ app.post('/webhook', async (req, res) => {
             } catch(e) { console.error("Error status plantilla:", e); }
         }
     }
+
     res.sendStatus(200);
   } catch (e) { res.sendStatus(500); }
 });
@@ -299,7 +386,7 @@ app.post('/api/appointments', async (req, res) => {
     } catch(e) { res.status(400).json({error: "Error creating"}); }
 });
 
-// RUTA GENERADOR AUTOMÁTICO (NUEVA)
+// RUTA GENERADOR AUTOMÁTICO
 app.post('/api/appointments/generate', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
@@ -335,7 +422,7 @@ app.post('/api/appointments/generate', async (req, res) => {
     } catch(e: any) { res.status(400).json({error: "Error", details: e.message}); }
 });
 
-// RUTA EDICIÓN (PUT) (NUEVA)
+// RUTA EDICIÓN (PUT)
 app.put('/api/appointments/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
@@ -370,32 +457,28 @@ async function handleContactUpdate(phone: string, text: string, profileName?: st
 async function saveAndEmitMessage(msg: any) { io.emit('message', msg); if (base) { try { await base('Messages').create([{ fields: { "text": msg.text, "sender": msg.sender, "recipient": msg.recipient, "timestamp": msg.timestamp, "type": msg.type, "media_id": msg.mediaId || "" } }], { typecast: true }); } catch (e) { console.error("Error guardando:", e); } } }
 
 io.on('connection', (socket) => {
-  // CONFIGURACIÓN Y CRUD
   socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
   socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
   socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Eliminado correctamente'); } });
   socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Actualizado correctamente'); } });
 
-  // RESPUESTAS RÁPIDAS
+  // Quick Replies
   socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('update_quick_reply', async (d) => { if (base) { await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
 
-  // AGENTES Y LOGIN
   socket.on('request_agents', async () => { if (base) { const r = await base('Agents').select().all(); socket.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); } });
   socket.on('login_attempt', async (data) => { if(!base) return; const r = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (r.length > 0) { const pwd = r[0].get('password'); if (!pwd || String(pwd).trim() === "") socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else if (String(pwd) === String(data.password)) socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role') }); else socket.emit('login_error', 'Contraseña incorrecta'); } else socket.emit('login_error', 'Usuario no encontrado'); });
   socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
   socket.on('delete_agent', async (d) => { if (!base) return; await base('Agents').destroy([d.agentId]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Eliminado'); });
   socket.on('update_agent', async (d) => { if (!base) return; const f: any = { "name": d.updates.name, "role": d.updates.role }; if (d.updates.password !== undefined) f["password"] = d.updates.password; await base('Agents').update([{ id: d.agentId, fields: f }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Actualizado'); });
-  
-  // CONTACTOS Y CHAT
   socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [] }))); } });
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
   socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
-  // MANUAL AI TRIGGER
+  // MANUAL AI TRIGGER (CON MEMORIA)
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;
     console.log(`🤖 Trigger Manual IA para ${phone}`);
@@ -403,9 +486,18 @@ io.on('connection', (socket) => {
     if (base) {
         activeAiChats.add(cleanNumber(phone));
         io.emit('ai_active_change', { phone: cleanNumber(phone), active: true });
+        
         const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanNumber(phone)}'` }).firstPage();
         if (records.length > 0) name = (records[0].get('name') as string) || "Cliente";
-        const msgs = await base('Messages').select({ filterByFormula: `OR({sender}='${cleanNumber(phone)}',{recipient}='${cleanNumber(phone)}')`, sort: [{field: "timestamp", direction: "desc"}], maxRecords: 1 }).firstPage();
+        
+        // Obtenemos historial reciente para la IA
+        const msgs = await base('Messages').select({ 
+            filterByFormula: `OR({sender}='${cleanNumber(phone)}',{recipient}='${cleanNumber(phone)}')`, 
+            sort: [{field: "timestamp", direction: "desc"}],
+            maxRecords: 1
+        }).firstPage();
+        
+        // Si hay mensaje previo, usamos ese como trigger, si no un saludo
         const text = msgs.length > 0 ? (msgs[0].get('text') as string) : "Hola";
         processAI(text, phone, name);
     }
@@ -418,4 +510,4 @@ io.on('connection', (socket) => {
   socket.on('typing', (d) => { socket.broadcast.emit('remote_typing', d); });
 });
 
-httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo ${PORT}`); });
+httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo en puerto ${PORT}`); });
