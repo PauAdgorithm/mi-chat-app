@@ -204,7 +204,6 @@ async function processAI(text: string, contactPhone: string, contactName: string
             
             PERSONALIDAD:
             - Eres amable, eficiente y humana.
-            - Usas emojis ocasionalmente (👋, 📅, ✅) pero sin exagerar.
             - Tu objetivo es ayudar al cliente a reservar cita o derivarlo al departamento correcto.
 
             INSTRUCCIONES CLAVE:
