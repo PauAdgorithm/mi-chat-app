@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Laura v6 (Lógica Simplificada)...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Laura v7 (Fix Citas)...");
 dotenv.config();
 
 const app = express();
@@ -18,7 +18,7 @@ app.use(express.json());
 
 // RUTA "PING"
 app.get('/', (req, res) => {
-  res.send('🤖 Servidor Chatgorithm (Laura v6) funcionando correctamente 🚀');
+  res.send('🤖 Servidor Chatgorithm (Laura v7) funcionando correctamente 🚀');
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -69,31 +69,30 @@ const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 async function getAvailableAppointments() {
     if (!base) return "Error: Base de datos no conectada";
     try {
-        console.log("🔍 IA solicitando agenda completa...");
-        // Traemos las próximas 50 citas para que la IA tenga contexto de sobra
+        console.log("🔍 IA solicitando agenda...");
         const records = await base('Appointments').select({
             filterByFormula: "{Status} = 'Available'",
             sort: [{ field: "Date", direction: "asc" }],
-            maxRecords: 50 
+            maxRecords: 60
         }).all();
         
         const now = new Date();
-        // Filtramos solo las que son futuras (mayor que ahora)
+        // Filtramos pasadas
         const validRecords = records.filter(r => new Date(r.get('Date') as string) > now);
 
-        if (validRecords.length === 0) return "No hay citas futuras disponibles en el sistema.";
+        if (validRecords.length === 0) return "No hay citas futuras disponibles. Pide al cliente otra fecha.";
         
-        // Devolvemos la lista cruda y limpia a la IA. Ella sabrá filtrar el día.
-        // Formato: ID | YYYY-MM-DD | HH:MM | DíaSemana
+        // FORMATO ULTRA SIMPLIFICADO PARA LA IA
+        // Evitamos comillas y caracteres raros que la confundan
         return validRecords.map(r => {
             const date = new Date(r.get('Date') as string);
             
-            // Formatos auxiliares para ayudar a la IA
-            const isoDate = date.toISOString().split('T')[0]; // 2023-12-09
+            const isoDate = date.toISOString().split('T')[0];
             const time = date.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit' });
             const weekday = date.toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid', weekday: 'long' });
 
-            return `ID: "${r.id}" | FECHA: ${isoDate} (${weekday}) | HORA: ${time}`;
+            // Ejemplo: ID:rec123abc - Martes 2023-10-10 a las 10:00
+            return `ID:${r.id} - ${weekday} ${isoDate} a las ${time}`;
         }).join("\n");
 
     } catch (error: any) {
@@ -105,15 +104,20 @@ async function getAvailableAppointments() {
 async function bookAppointment(appointmentId: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
     
-    // Limpieza extrema del ID
+    // LIMPIEZA DE ID ROBUSTA
+    // 1. Quitamos comillas y espacios
     let cleanId = appointmentId.trim().replace(/['"]/g, '');
+    // 2. Quitamos prefijo "ID:" o "id:" si la IA lo incluyó
     if (cleanId.toUpperCase().startsWith("ID:")) cleanId = cleanId.substring(3).trim();
+    if (cleanId.toUpperCase().startsWith("ID")) cleanId = cleanId.substring(2).trim(); // Por si puso "ID "
+    // 3. Quitamos puntos finales (error común de GPT)
+    if (cleanId.endsWith(".")) cleanId = cleanId.slice(0, -1);
     
-    console.log(`📅 INTENTO RESERVA: ID "${cleanId}" para ${clientName}`);
+    console.log(`📅 INTENTO RESERVA | Raw: "${appointmentId}" | Clean: "${cleanId}" | Cliente: ${clientName}`);
     
     try {
         const record = await base('Appointments').find(cleanId);
-        if (!record) return "❌ Error: ID no encontrado. Pide al cliente que elija otra hora.";
+        if (!record) return "❌ Error: ID no encontrado. Asegúrate de copiar el ID exacto de la lista.";
         if (record.get('Status') !== 'Available') return "❌ Esa hora ya no está libre. Pide elegir otra.";
 
         await base('Appointments').update([{ 
@@ -124,9 +128,10 @@ async function bookAppointment(appointmentId: string, clientPhone: string, clien
         activeAiChats.delete(cleanNumber(clientPhone));
         io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
-        return "✅ Cita confirmada y reservada. Despídete cordialmente.";
+        return "✅ Cita confirmada exitosamente. Despídete.";
     } catch (e: any) { 
         console.error("Error reservando:", e);
+        if (e.error === 'NOT_FOUND') return "❌ Error técnico: ID de cita no válido.";
         return "❌ Error técnico al guardar."; 
     }
 }
@@ -187,25 +192,23 @@ async function processAI(text: string, contactPhone: string, contactName: string
     try {
         const history = await getChatHistory(contactPhone);
         
-        // Fecha actual clara para la IA
         const now = new Date().toLocaleString('es-ES', { 
             timeZone: 'Europe/Madrid', 
             weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' 
         });
 
+        // Prompt ajustado para que entienda mejor la lista
         const messages = [
-            { role: "system", content: `Eres 'Laura', la asistente del taller Chatgorithm.
+            { role: "system", content: `Eres 'Laura', asistente de Chatgorithm.
             
-            DATOS DE HOY:
-            - Fecha/Hora actual: ${now} (Hora Madrid).
+            HOY ES: ${now}.
             
-            INSTRUCCIONES:
-            1. Tu misión es dar cita o clasificar la consulta.
-            2. Usa 'get_available_appointments' para VER la lista de huecos. La herramienta te devolverá TODAS las citas futuras. TU TRABAJO es leer esa lista y filtrar mentalmente las que coincidan con lo que pide el usuario (ej: "el martes").
-            3. Si el usuario pide un día y SÍ hay huecos en la lista para ese día, ofrécelos. Si NO hay huecos en la lista para ese día, di que no quedan.
-            4. Para reservar, usa 'book_appointment' copiando el ID exacto de la lista.
-            5. Si reservas con éxito, confirma la hora y despídete.
-            6. Tono: Profesional, cercano, SIN EMOJIS.
+            TU TRABAJO:
+            1. Ver huecos libres con 'get_available_appointments'.
+            2. La lista que recibes tiene este formato: "ID:recXXXXX - Fecha...".
+            3. Para reservar, debes extraer SOLAMENTE el código que empieza por "rec" (ej: rec123abc) y pasarlo a 'book_appointment'.
+            4. Si reservas con éxito, confirma y despídete.
+            5. Tono profesional, amable, sin emojis.
             ` },
             ...history, 
             { role: "user", content: text } 
@@ -219,18 +222,18 @@ async function processAI(text: string, contactPhone: string, contactName: string
                     type: "function",
                     function: {
                         name: "get_available_appointments",
-                        description: "Obtener la lista completa de próximas citas disponibles."
+                        description: "Ver lista de ID y Fechas libres."
                     }
                 },
                 {
                     type: "function",
                     function: {
                         name: "book_appointment",
-                        description: "Reservar cita. OBLIGATORIO usar el ID de la lista.",
+                        description: "Reservar cita. El appointmentId debe ser el código ID (empieza por 'rec') de la lista.",
                         parameters: {
                             type: "object",
                             properties: {
-                                appointmentId: { type: "string", description: "El ID (rec...) de la cita" }
+                                appointmentId: { type: "string", description: "ID de la cita (rec...)" }
                             },
                             required: ["appointmentId"]
                         }
@@ -240,7 +243,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
                     type: "function",
                     function: {
                         name: "assign_department",
-                        description: "Derivar a humano (Ventas/Taller).",
+                        description: "Derivar a humano.",
                         parameters: {
                             type: "object",
                             properties: {
@@ -274,7 +277,6 @@ async function processAI(text: string, contactPhone: string, contactName: string
             console.log(`⚙️ IA Tool: ${fnName}`, args);
 
             if (fnName === "get_available_appointments") {
-                // Ya no pasamos argumentos, la IA recibe todo y filtra ella
                 toolResult = await getAvailableAppointments();
             } else if (fnName === "book_appointment") {
                 toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
@@ -445,11 +447,15 @@ app.delete('/api/delete-template/:id', async (req, res) => { if (!base) return r
 app.post('/api/send-template', async (req, res) => { if (!waToken || !waPhoneId) return res.status(500).json({ error: "Credenciales" }); try { const { templateName, language, phone, variables, previewText, senderName } = req.body; const parameters = variables.map((val: string) => ({ type: "text", text: val })); await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: cleanNumber(phone), type: "template", template: { name: templateName, language: { code: language }, components: [{ type: "body", parameters: parameters }] } }, { headers: { Authorization: `Bearer ${waToken}` } }); const finalMessage = previewText || `📝 [Plantilla] ${templateName}`; await saveAndEmitMessage({ text: finalMessage, sender: senderName || "Agente", recipient: cleanNumber(phone), timestamp: new Date().toISOString(), type: "template" }); res.json({ success: true }); } catch (error: any) { res.status(400).json({ error: "Error envío" }); } });
 app.get('/api/analytics', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { const contacts = await base('Contacts').select().all(); const messages = await base('Messages').select().all(); const totalContacts = contacts.length; const totalMessages = messages.length; const newLeads = contacts.filter(c => c.get('status') === 'Nuevo').length; const last7Days = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return d.toISOString().split('T')[0]; }).reverse(); const activityData = last7Days.map(date => { const count = messages.filter(m => { const mDate = (m.get('timestamp') as string || "").split('T')[0]; return mDate === date; }).length; return { date, label: new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }), count }; }); const agentStats: Record<string, { msgs: number, uniqueChats: Set<string> }> = {}; messages.forEach(m => { const sender = (m.get('sender') as string) || ""; const recipient = (m.get('recipient') as string) || ""; const isPhone = /^\d+$/.test(sender.replace(/\D/g, '')); if (!isPhone && sender.toLowerCase() !== 'sistema' && sender.trim() !== '') { if (!agentStats[sender]) agentStats[sender] = { msgs: 0, uniqueChats: new Set() }; agentStats[sender].msgs += 1; if (recipient) agentStats[sender].uniqueChats.add(recipient); } }); const agentPerformance = Object.entries(agentStats).map(([name, data]) => ({ name, msgCount: data.msgs, chatCount: data.uniqueChats.size })).sort((a, b) => b.msgCount - a.msgCount).slice(0, 5); const statusMap: Record<string, number> = {}; contacts.forEach(c => { const s = (c.get('status') as string) || 'Otros'; statusMap[s] = (statusMap[s] || 0) + 1; }); const statusDistribution = Object.entries(statusMap).map(([name, count]) => ({ name, count })); res.json({ kpis: { totalContacts, totalMessages, newLeads }, activity: activityData, agents: agentPerformance, statuses: statusDistribution }); } catch (e) { res.status(500).json({ error: "Error" }); } });
 app.get('/api/media/:id', async (req, res) => { if (!waToken) return res.sendStatus(500); try { const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${req.params.id}`, { headers: { 'Authorization': `Bearer ${waToken}` } }); const mediaRes = await axios.get(urlRes.data.url, { headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream' }); res.setHeader('Content-Type', mediaRes.headers['content-type']); mediaRes.data.pipe(res); } catch (e) { res.sendStatus(404); } });
-app.post('/api/upload', upload.single('file'), async (req: any, res: any) => { try { const file = req.file; const { targetPhone, senderName } = req.body; if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" }); const formData = new FormData(); formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype }); formData.append('messaging_product', 'whatsapp'); const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } }); const mediaId = uploadRes.data.id; let msgType = 'document'; if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') msgType = 'image'; else if (file.mimetype.startsWith('audio/') || ['audio/aac', 'audio/mp4', 'audio/amr', 'audio/mpeg', 'audio/ogg'].includes(file.mimetype)) msgType = 'audio'; const payload: any = { messaging_product: "whatsapp", to: cleanNumber(targetPhone), type: msgType }; payload[msgType] = { id: mediaId, ...(msgType === 'document' && { filename: file.originalname }) }; await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { headers: { Authorization: `Bearer ${waToken}` } }); let textLog = file.originalname; let saveType = 'document'; if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; } else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; } else if (file.mimetype.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; } await saveAndEmitMessage({ text: textLog, sender: senderName || "Agente", recipient: cleanNumber(targetPhone), timestamp: new Date().toISOString(), type: saveType, mediaId }); await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); } });
+app.post('/api/upload', upload.single('file'), async (req: any, res: any) => { try { const file = req.file; const { targetPhone, senderName } = req.body; if (!file || !targetPhone) return res.status(400).json({ error: "Faltan datos" }); const formData = new FormData(); formData.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype }); formData.append('messaging_product', 'whatsapp'); const uploadRes = await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/media`, formData, { headers: { 'Authorization': `Bearer ${waToken}`, ...formData.getHeaders() } }); const mediaId = uploadRes.data.id; let msgType = 'document'; if (file.mimetype.startsWith('image')) msgType = 'image'; else if (file.mimetype.startsWith('audio')) msgType = 'audio'; const payload: any = { messaging_product: "whatsapp", to: cleanNumber(targetPhone), type: msgType }; payload[msgType] = { id: mediaId, ...(msgType === 'document' && { filename: file.originalname }) }; await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, payload, { headers: { Authorization: `Bearer ${waToken}` } }); let textLog = file.originalname; let saveType = 'document'; if (msgType === 'image') { textLog = "📷 [Imagen]"; saveType = 'image'; } else if (msgType === 'audio') { textLog = "🎤 [Audio]"; saveType = 'audio'; } else if (file.mimetype.includes('audio')) { textLog = "🎤 [Audio WebM]"; saveType = 'audio'; } await saveAndEmitMessage({ text: textLog, sender: senderName || "Agente", recipient: cleanNumber(targetPhone), timestamp: new Date().toISOString(), type: saveType, mediaId }); await handleContactUpdate(targetPhone, `Tú (${senderName}): 📎 Archivo`); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error subiendo archivo" }); } });
 
 // --- HELPERS ---
 async function handleContactUpdate(phone: string, text: string, profileName?: string) { if (!base) return null; const clean = cleanNumber(phone); try { const contacts = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'`, maxRecords: 1 }).firstPage(); if (contacts.length > 0) { await base('Contacts').update([{ id: contacts[0].id, fields: { "last_message": text, "last_message_time": new Date().toISOString() } }]); return contacts[0]; } else { const newContact = await base('Contacts').create([{ fields: { "phone": clean, "name": profileName || clean, "status": "Nuevo", "last_message": text, "last_message_time": new Date().toISOString() } }]); io.emit('contact_updated_notification'); return newContact[0]; } } catch (e) { console.error("Error Contactos:", e); return null; } }
 async function saveAndEmitMessage(msg: any) { io.emit('message', msg); if (base) { try { await base('Messages').create([{ fields: { "text": msg.text, "sender": msg.sender, "recipient": msg.recipient, "timestamp": msg.timestamp, "type": msg.type, "media_id": msg.mediaId || "" } }], { typecast: true }); } catch (e) { console.error("Error guardando:", e); } } }
+
+// ==========================================
+//  SOCKET.IO LOGIC
+// ==========================================
 
 io.on('connection', (socket) => {
   socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
