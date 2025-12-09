@@ -16,7 +16,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// RUTA "PING"
 app.get('/', (req, res) => {
   res.send('🤖 Servidor Chatgorithm (Laura v10) funcionando correctamente 🚀');
 });
@@ -24,7 +23,7 @@ app.get('/', (req, res) => {
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
-// --- VARIABLES DE ENTORNO ---
+// --- VARIABLES ---
 const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
 const waToken = process.env.WHATSAPP_TOKEN;
@@ -62,7 +61,7 @@ const activeAiChats = new Set<string>();
 
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
-// --- PROMPT POR DEFECTO ---
+// --- PROMPT POR DEFECTO (Si no hay nada en Airtable) ---
 const DEFAULT_SYSTEM_PROMPT = `Eres 'Laura', la asistente del taller Chatgorithm.
 TU OBJETIVO: Gestionar citas y clasificar clientes.
 REGLAS:
@@ -71,7 +70,9 @@ REGLAS:
 3. Si asignas departamento o el cliente se despide, usa 'stop_conversation'.
 4. Tono profesional, amable, SIN EMOJIS.`;
 
-// --- HELPER CONFIGURACIÓN DINÁMICA ---
+// ==========================================
+//  HELPER: OBTENER PROMPT DINÁMICO
+// ==========================================
 async function getSystemPrompt() {
     if (!base) return DEFAULT_SYSTEM_PROMPT;
     try {
@@ -83,7 +84,7 @@ async function getSystemPrompt() {
         if (records.length > 0) {
             return records[0].get('Value') as string;
         } else {
-            // Auto-crear si no existe
+            // Si no existe, lo creamos para que el usuario pueda editarlo luego
             await base('BotSettings').create([{ fields: { "Setting": "system_prompt", "Value": DEFAULT_SYSTEM_PROMPT } }]);
             return DEFAULT_SYSTEM_PROMPT;
         }
@@ -100,6 +101,7 @@ async function getSystemPrompt() {
 async function getAvailableAppointments() {
     if (!base) return "Error: Base de datos no conectada";
     try {
+        console.log("🔍 IA solicitando agenda...");
         const records = await base('Appointments').select({
             filterByFormula: "{Status} = 'Available'",
             sort: [{ field: "Date", direction: "asc" }],
@@ -137,6 +139,7 @@ async function bookAppointment(appointmentId: string, clientPhone: string, clien
         if (!record) return "❌ Error: ID no encontrado.";
         if (record.get('Status') !== 'Available') return "❌ Esa hora ya no está libre.";
 
+        // Formato humano para confirmar
         const dateVal = new Date(record.get('Date') as string);
         const humanDate = dateVal.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'full', timeStyle: 'short' });
 
@@ -188,7 +191,7 @@ async function getChatHistory(phone: string, limit = 10) {
 }
 
 // ==========================================
-//  PROCESADOR INTELIGENTE
+//  PROCESADOR INTELIGENTE (USANDO PROMPT DINÁMICO)
 // ==========================================
 
 async function processAI(text: string, contactPhone: string, contactName: string) {
@@ -201,7 +204,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
     try {
         const history = await getChatHistory(contactPhone);
         
-        // 1. CARGAMOS EL PROMPT DINÁMICO
+        // 1. CARGAMOS EL PROMPT DESDE AIRTABLE
         const systemPrompt = await getSystemPrompt();
         
         const now = new Date().toLocaleString('es-ES', { 
@@ -381,6 +384,7 @@ async function saveAndEmitMessage(msg: any) { io.emit('message', msg); if (base)
 // --- SOCKETS ---
 io.on('connection', (socket) => {
   // ... (Tus sockets anteriores) ...
+  // Mantén todos los sockets que ya funcionaban: request_config, agents, chat, trigger_ai_manual...
   socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('Name'), type: x.get('Type') }))); } });
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;

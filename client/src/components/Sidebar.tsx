@@ -5,7 +5,7 @@ import {
   RefreshCw, 
   UserCheck, 
   Briefcase, 
-  Filter as FilterIcon, // <--- RENOMBRADO PARA EVITAR CONFLICTOS
+  Filter, 
   User, 
   ChevronDown, 
   X, 
@@ -45,20 +45,21 @@ interface SidebarProps {
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
 }
 
-// Tipos de filtro
-type ViewScope = 'all' | 'mine' | 'unassigned';
+type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
 
-// Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView }: SidebarProps) {
-  // 1. ESTADOS (Orden Correcto)
-  const [viewScope, setViewScope] = useState<ViewScope>('all'); 
+  // 1. ESTADOS (MOVIDOS AQUÍ ARRIBA PARA EVITAR EL ERROR DE PANTALLA BLANCA)
+  const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [filterValue, setFilterValue] = useState<string>(''); 
   const [showFilters, setShowFilters] = useState(false);
   
   const [activeFilters, setActiveFilters] = useState({
@@ -76,7 +77,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 2. EFECTOS
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
@@ -167,12 +167,11 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // 3. LÓGICA DE FILTRADO (Segura y Limpia)
+  // --- LÓGICA DE FILTRADO (Ahora segura porque viewScope ya existe) ---
   const filteredContacts = contacts.filter(c => {
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // Usamos viewScope directamente
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
@@ -190,10 +189,20 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
+  const handleFilterClick = (type: FilterType) => {
+      // Compatibilidad con botones antiguos si fuera necesario, 
+      // pero ahora usamos viewScope para las tabs principales.
+      if (type === 'all' || type === 'mine' || type === 'unassigned') {
+          setViewScope(type as any);
+      } else {
+          // Lógica para togglear el panel de filtros si pulsas botones extra
+          setShowFilters(true);
+      }
+  };
+
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
-      {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
@@ -217,7 +226,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                 className={`p-2 rounded-lg transition-all border ${showFilters || hasActiveFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                 title="Filtros Avanzados"
             >
-                {hasActiveFilters ? <FilterIcon className="w-4 h-4 fill-current" /> : <FilterIcon className="w-4 h-4" />}
+                {hasActiveFilters ? <Filter className="w-4 h-4 fill-current" /> : <Filter className="w-4 h-4" />}
             </button>
         </div>
 
@@ -269,7 +278,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
-                    {hasActiveFilters ? <FilterIcon className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
+                    {hasActiveFilters ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
                 </div>
                 <p>{isConnected ? (hasActiveFilters ? "No hay chats con estos filtros" : "Cargando chats...") : "Esperando conexión..."}</p>
             </div>
@@ -318,6 +327,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                               </span>
                           ))}
                           {contact.tags && contact.tags.length > 2 && <span className="text-[9px] text-slate-400">+{contact.tags.length - 2}</span>}
+                          
+                          {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
+                          {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                       </div>
                     </div>
                   </button>
@@ -328,24 +340,32 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
-      {onlineUsers.length > 0 && (
-        <div className="bg-slate-50 border-t border-slate-200 p-3">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+      <div className="bg-slate-50 border-t border-slate-200 p-3">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                Equipo Online ({onlineUsers.length})
+                Online ({onlineUsers.length})
             </h3>
-            <div className="flex flex-wrap gap-2">
-                {onlineUsers.map((agentName, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                        <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
-                            {agentName === user.username ? 'Tú' : agentName}
-                        </span>
-                    </div>
-                ))}
-            </div>
-        </div>
-      )}
+            <button 
+                onClick={() => setView('calendar')} 
+                className="p-1.5 bg-white border border-slate-200 rounded-md text-slate-400 hover:text-purple-600 hover:border-purple-200 transition shadow-sm"
+                title="Ver Agenda"
+            >
+                <CalendarIcon className="w-4 h-4" />
+            </button>
+          </div>
+            
+          <div className="flex flex-wrap gap-2 mb-2">
+              {onlineUsers.map((agentName, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full shadow-sm group hover:border-blue-300 transition-colors cursor-default">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                      <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 max-w-[80px] truncate">
+                          {agentName === user.username ? 'Tú' : agentName}
+                      </span>
+                  </div>
+              ))}
+          </div>
+      </div>
     </div>
   );
 }
