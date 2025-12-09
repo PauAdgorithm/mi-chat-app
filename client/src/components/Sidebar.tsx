@@ -5,12 +5,13 @@ import {
   RefreshCw, 
   UserCheck, 
   Briefcase, 
-  Filter, 
+  Filter as FilterIcon, // <--- RENOMBRADO PARA EVITAR CONFLICTOS
   User, 
   ChevronDown, 
   X, 
   Hash,
-  CheckCircle 
+  CheckCircle,
+  Calendar as CalendarIcon 
 } from 'lucide-react';
 
 export interface Contact {
@@ -44,22 +45,20 @@ interface SidebarProps {
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
 }
 
-type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
+// Tipos de filtro
+type ViewScope = 'all' | 'mine' | 'unassigned';
 
+// Helper para limpiar teléfonos
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
 };
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView }: SidebarProps) {
-  // 1. DECLARACIÓN DE ESTADOS (PRIMERO DE TODO)
-  // Esto arregla el error de "Cannot access before initialization"
-  const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
+  // 1. ESTADOS (Orden Correcto)
+  const [viewScope, setViewScope] = useState<ViewScope>('all'); 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  const [filter, setFilter] = useState<FilterType>('all');
-  const [filterValue, setFilterValue] = useState<string>(''); 
   const [showFilters, setShowFilters] = useState(false);
   
   const [activeFilters, setActiveFilters] = useState({
@@ -77,7 +76,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 2. EFECTOS (CARGA DE DATOS)
+  // 2. EFECTOS
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
@@ -168,25 +167,19 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // 3. LÓGICA DE FILTRADO (Ahora segura)
+  // 3. LÓGICA DE FILTRADO (Segura y Limpia)
   const filteredContacts = contacts.filter(c => {
-      // Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // Pestañas Principales (viewScope ya está definido arriba)
+      // Usamos viewScope directamente
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
-      // Filtros Avanzados
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
-      
-      // Etiquetas
-      if (activeFilters.tag) {
-          if (!c.tags || !c.tags.includes(activeFilters.tag)) return false;
-      }
+      if (activeFilters.tag && (!c.tags || !c.tags.includes(activeFilters.tag))) return false;
 
       return true;
   });
@@ -196,14 +189,6 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   };
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
-
-  const handleFilterClick = (type: FilterType) => {
-      if (type === 'all' || type === 'mine' || type === 'unassigned') {
-          setViewScope(type as any);
-      } else {
-          setShowFilters(true);
-      }
-  };
 
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
@@ -232,7 +217,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                 className={`p-2 rounded-lg transition-all border ${showFilters || hasActiveFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                 title="Filtros Avanzados"
             >
-                {hasActiveFilters ? <Filter className="w-4 h-4 fill-current" /> : <Filter className="w-4 h-4" />}
+                {hasActiveFilters ? <FilterIcon className="w-4 h-4 fill-current" /> : <FilterIcon className="w-4 h-4" />}
             </button>
         </div>
 
@@ -284,7 +269,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
-                    {hasActiveFilters ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
+                    {hasActiveFilters ? <FilterIcon className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
                 </div>
                 <p>{isConnected ? (hasActiveFilters ? "No hay chats con estos filtros" : "Cargando chats...") : "Esperando conexión..."}</p>
             </div>
