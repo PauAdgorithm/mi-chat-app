@@ -9,22 +9,22 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor con IA Laura v13 (Mapeo Inteligente)...");
+console.log("🚀 [BOOT] Arrancando servidor con IA Laura PRO (Lenguaje Natural)...");
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// RUTA "PING"
+// RUTA PING
 app.get('/', (req, res) => {
-  res.send('🤖 Servidor Chatgorithm (Laura v13) funcionando correctamente 🚀');
+  res.send('🤖 Servidor Chatgorithm (Laura Pro) Online 🚀');
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
-// --- VARIABLES DE ENTORNO ---
+// --- VARIABLES ---
 const airtableApiKey = process.env.AIRTABLE_API_KEY;
 const airtableBaseId = process.env.AIRTABLE_BASE_ID;
 const waToken = process.env.WHATSAPP_TOKEN;
@@ -35,13 +35,13 @@ const openaiApiKey = process.env.OPENAI_API_KEY;
 
 const TABLE_TEMPLATES = 'Templates';
 
-// --- CONFIGURACIÓN ---
+// --- CONFIG ---
 let base: Airtable.Base | null = null;
 if (airtableApiKey && airtableBaseId) {
   try {
     base = new Airtable({ apiKey: airtableApiKey }).base(airtableBaseId);
     console.log("✅ Conexión Airtable inicializada");
-  } catch (e) { console.error("Error crítico configurando Airtable:", e); }
+  } catch (e) { console.error("Error Airtable:", e); }
 }
 
 let openai: OpenAI | null = null;
@@ -59,21 +59,18 @@ const io = new Server(httpServer, {
 
 const onlineUsers = new Map<string, string>();
 const activeAiChats = new Set<string>();
-
-// MEMORIA TEMPORAL DE OPCIONES DE CITAS (Phone -> Map<Index, ID>)
-// Esto permite que la IA diga "reserva la opción 1" y nosotros sepamos qué ID es.
-const appointmentCache = new Map<string, Map<number, string>>();
-
 const cleanNumber = (phone: string) => phone ? phone.replace(/\D/g, '') : "";
 
 // --- PROMPT POR DEFECTO ---
 const DEFAULT_SYSTEM_PROMPT = `Eres 'Laura', la asistente del taller Chatgorithm.
-TU OBJETIVO: Gestionar citas y clasificar clientes.
-REGLAS:
-1. Usa 'get_available_appointments' para ver la lista numerada de huecos.
-2. Muestra las opciones al cliente de forma clara (ej: "1. Lunes a las 10:00").
-3. Si el cliente elige una, usa 'book_appointment' con el NÚMERO de la opción (ej: 1, 2, 3).
-4. Tono profesional, amable, SIN EMOJIS.`;
+TU OBJETIVO: Gestionar citas y clasificar clientes de forma natural.
+
+REGLAS DE ORO:
+1. Habla como una persona, no uses listas numeradas si no es necesario.
+2. Usa 'get_available_appointments' para saber qué huecos hay.
+3. Cuando el cliente te diga una hora (ej: "a las 10"), usa 'book_appointment' enviando la FECHA Y HORA COMPLETA (YYYY-MM-DD HH:mm) que deduzcas.
+4. Si la reserva falla, disculpate y ofrece otra hora.
+5. Tono profesional y cercano.`;
 
 async function getSystemPrompt() {
     if (!base) return DEFAULT_SYSTEM_PROMPT;
@@ -84,83 +81,78 @@ async function getSystemPrompt() {
 }
 
 // ==========================================
-//  HERRAMIENTAS DE LA IA (TOOLS)
+//  HERRAMIENTAS IA (LÓGICA FECHAS)
 // ==========================================
 
-async function getAvailableAppointments(clientPhone: string) {
-    if (!base) return "Error: Base de datos no conectada";
+async function getAvailableAppointments() {
+    if (!base) return "Error DB";
     try {
         const records = await base('Appointments').select({
             filterByFormula: "{Status} = 'Available'",
             sort: [{ field: "Date", direction: "asc" }],
-            maxRecords: 100 
+            maxRecords: 50
         }).all();
         
         const now = new Date();
-        const validRecords = records.filter(r => new Date(r.get('Date') as string) > now).slice(0, 10);
+        // Filtramos citas futuras
+        const validRecords = records.filter(r => new Date(r.get('Date') as string) > now).slice(0, 15);
 
-        if (validRecords.length === 0) return "No hay citas disponibles. Pide al cliente otra fecha.";
+        if (validRecords.length === 0) return "No hay citas libres.";
         
-        // GUARDAMOS EL MAPEO EN MEMORIA
-        const optionsMap = new Map<number, string>();
-        
-        const optionsText = validRecords.map((r, index) => {
-            const num = index + 1; // 1, 2, 3...
+        // Devolvemos solo fechas legibles para que la IA las entienda y se las diga al usuario
+        return validRecords.map(r => {
             const date = new Date(r.get('Date') as string);
-            
-            // Guardamos ID real vinculado al número
-            optionsMap.set(num, r.id);
-
-            const humanDate = date.toLocaleString('es-ES', { 
-                timeZone: 'Europe/Madrid',
-                weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
-            });
-            return `OPCIÓN ${num}: ${humanDate}`;
+            // Formato ISO para que la IA calcule bien: YYYY-MM-DD HH:mm
+            const iso = date.toLocaleString('sv-SE', { timeZone: 'Europe/Madrid' }).replace(' ', 'T').slice(0, 16); 
+            // Formato Humano para contexto
+            const human = date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+            return `Disponible: ${human} (ISO: ${iso})`;
         }).join("\n");
-
-        appointmentCache.set(cleanNumber(clientPhone), optionsMap);
-
-        return "Citas disponibles (Ofréceselas al cliente para que elija el número):\n" + optionsText;
-
-    } catch (error: any) {
-        return "Error técnico al leer la agenda.";
-    }
+    } catch (error: any) { return "Error técnico agenda."; }
 }
 
-async function bookAppointment(optionNumber: number, clientPhone: string, clientName: string) {
+// NUEVA FUNCIÓN: RESERVA POR FECHA (NO POR ID)
+async function bookAppointmentByDate(targetDateISO: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
     
-    // RECUPERAMOS EL ID REAL USANDO EL NÚMERO
-    const cleanPhone = cleanNumber(clientPhone);
-    const userCache = appointmentCache.get(cleanPhone);
-    
-    if (!userCache) return "❌ Error: No tengo la lista de citas en memoria. Por favor, consulta disponibilidad de nuevo ('get_available_appointments') antes de reservar.";
-    
-    const realId = userCache.get(optionNumber);
-    
-    if (!realId) return `❌ Error: La opción ${optionNumber} no es válida. Pide al cliente que elija un número de la lista mostrada.`;
-
-    console.log(`📅 RESERVA: Opción ${optionNumber} -> ID Real "${realId}" para ${clientName}`);
+    console.log(`📅 INTENTO RESERVA POR FECHA: Buscando "${targetDateISO}" para ${clientName}`);
     
     try {
-        const record = await base('Appointments').find(realId);
-        if (!record || record.get('Status') !== 'Available') return "❌ Esa hora ya ha sido ocupada. Por favor, consulta disponibilidad de nuevo.";
+        // 1. Buscamos el registro que coincida con esa fecha/hora
+        // La IA nos manda YYYY-MM-DDTHH:mm, buscamos coincidencias
+        const targetDate = new Date(targetDateISO);
+        
+        // Margen de error de 1 minuto por si acaso
+        const records = await base('Appointments').select({
+            filterByFormula: `AND({Status} = 'Available')`, 
+            maxRecords: 100
+        }).all();
 
-        const dateVal = new Date(record.get('Date') as string);
-        const humanDate = dateVal.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'full', timeStyle: 'short' });
+        // Filtro manual en JS para asegurar coincidencia exacta de hora
+        const match = records.find(r => {
+            const rDate = new Date(r.get('Date') as string);
+            // Comparamos timestamps (ignorando segundos)
+            return Math.abs(rDate.getTime() - targetDate.getTime()) < 60000; 
+        });
 
+        if (!match) {
+            return `❌ No encontré ningún hueco libre exactamente el ${targetDate.toLocaleString('es-ES', {timeZone: 'Europe/Madrid'})}. ¿Seguro que era esa hora? Por favor verifica la lista de disponibles.`;
+        }
+
+        // 2. Reservamos usando el ID que acabamos de encontrar
         await base('Appointments').update([{ 
-            id: realId, 
+            id: match.id, 
             fields: { "Status": "Booked", "ClientPhone": clientPhone, "ClientName": clientName } 
         }]);
         
-        // Limpiamos caché y cerramos sesión IA
-        appointmentCache.delete(cleanPhone);
-        activeAiChats.delete(cleanPhone);
-        io.emit('ai_active_change', { phone: cleanPhone, active: false });
+        activeAiChats.delete(cleanNumber(clientPhone));
+        io.emit('ai_active_change', { phone: cleanNumber(clientPhone), active: false });
         
-        return `✅ RESERVA ÉXITO para el ${humanDate}. Confirma al cliente.`;
+        const humanDate = new Date(match.get('Date') as string).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'full', timeStyle: 'short' });
+        return `✅ RESERVA CONFIRMADA para el ${humanDate}.`;
+
     } catch (e: any) { 
+        console.error("Error bookByDate:", e);
         return "❌ Error técnico al guardar."; 
     }
 }
@@ -184,7 +176,7 @@ async function assignDepartment(clientPhone: string, department: string) {
 async function stopConversation(phone: string) {
     activeAiChats.delete(cleanNumber(phone));
     io.emit('ai_active_change', { phone: cleanNumber(phone), active: false });
-    return "Fin de conversación.";
+    return "Fin conversación.";
 }
 
 async function getChatHistory(phone: string, limit = 10) {
@@ -195,20 +187,17 @@ async function getChatHistory(phone: string, limit = 10) {
             sort: [{ field: "timestamp", direction: "desc" }],
             maxRecords: limit
         }).all();
-
         return [...records].reverse().map((r: any) => {
             const sender = r.get('sender') as string;
-            const isBot = sender === 'Bot IA' || sender === 'Agente' || /[a-zA-Z]/.test(sender);
-            return {
-                role: isBot ? "assistant" : "user",
-                content: r.get('text') as string || ""
-            } as any; 
+            const role = (sender === 'Bot IA' || sender === 'Agente' || /[a-zA-Z]/.test(sender)) ? "assistant" : "user";
+            const text = r.get('text') as string;
+            return { role, content: text || "" } as any; 
         });
     } catch (e) { return []; }
 }
 
 // ==========================================
-//  CEREBRO DE LA IA
+//  CEREBRO
 // ==========================================
 
 async function processAI(text: string, contactPhone: string, contactName: string) {
@@ -222,12 +211,11 @@ async function processAI(text: string, contactPhone: string, contactName: string
         const history = await getChatHistory(contactPhone);
         const systemPrompt = await getSystemPrompt();
         
-        const now = new Date().toLocaleString('es-ES', { 
-            timeZone: 'Europe/Madrid', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' 
-        });
+        // Hora actual para que la IA calcule fechas relativas ("mañana", "el martes")
+        const now = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Madrid' }).replace(' ', 'T'); 
 
         const messages = [
-            { role: "system", content: `${systemPrompt}\n\n[SISTEMA: Hoy es ${now}. Para reservar, usa 'book_appointment' enviando el NÚMERO DE OPCIÓN (1, 2, 3...) que te dio la herramienta 'get_available_appointments'. NO intentes usar IDs largos.]` },
+            { role: "system", content: `${systemPrompt}\n\n[SISTEMA: Fecha actual ISO: ${now}. \nINSTRUCCIÓN CRÍTICA: Cuando el usuario quiera reservar, usa la herramienta 'book_appointment' pasando la FECHA Y HORA ISO EXACTA (YYYY-MM-DDTHH:mm) de la cita que quiere. No pidas IDs, deduce la fecha completa basada en el contexto.]` },
             ...history, 
             { role: "user", content: text } 
         ];
@@ -240,20 +228,20 @@ async function processAI(text: string, contactPhone: string, contactName: string
                     type: "function",
                     function: {
                         name: "get_available_appointments",
-                        description: "Ver lista numerada de citas libres."
+                        description: "Ver lista de fechas y horas disponibles."
                     }
                 },
                 {
                     type: "function",
                     function: {
                         name: "book_appointment",
-                        description: "Reservar una cita por su número de opción.",
+                        description: "Reservar una cita en una fecha y hora específica.",
                         parameters: {
                             type: "object",
                             properties: {
-                                optionNumber: { type: "number", description: "El número de la opción elegida (1, 2, 3...)" }
+                                targetTimeISO: { type: "string", description: "Fecha y hora en formato ISO (YYYY-MM-DDTHH:mm) que quiere el cliente" }
                             },
-                            required: ["optionNumber"]
+                            required: ["targetTimeISO"]
                         }
                     }
                 },
@@ -284,11 +272,13 @@ async function processAI(text: string, contactPhone: string, contactName: string
             const args = JSON.parse(toolCall.function.arguments);
             let toolResult = "";
 
+            console.log(`⚙️ IA Tool: ${fnName}`, args);
+
             if (fnName === "get_available_appointments") {
-                // Pasamos el teléfono para guardar el mapeo en caché
-                toolResult = await getAvailableAppointments(contactPhone);
+                toolResult = await getAvailableAppointments();
             } else if (fnName === "book_appointment") {
-                toolResult = await bookAppointment(args.optionNumber, contactPhone, contactName);
+                // Aquí usamos la nueva función basada en fecha
+                toolResult = await bookAppointmentByDate(args.targetTimeISO, contactPhone, contactName);
             } else if (fnName === "assign_department") {
                 toolResult = await assignDepartment(contactPhone, args.department);
             } else if (fnName === "stop_conversation") {
@@ -297,11 +287,7 @@ async function processAI(text: string, contactPhone: string, contactName: string
 
             const secondResponse = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
-                messages: [
-                    ...messages,
-                    msg,
-                    { role: "tool", tool_call_id: toolCall.id, content: toolResult }
-                ] as any
+                messages: [ ...messages, msg, { role: "tool", tool_call_id: toolCall.id, content: toolResult } ] as any
             });
             
             const finalReply = secondResponse.choices[0].message.content;
@@ -430,7 +416,7 @@ app.delete('/api/appointments/:id', async (req, res) => {
     try { await base('Appointments').destroy([req.params.id]); res.json({ success: true }); } catch(e) { res.status(400).json({error: "Error deleting"}); }
 });
 
-// RESTO RUTAS (Mantenidas)
+// RESTO RUTAS
 app.get('/api/templates', async (req, res) => { if (!base) return res.status(500).json({}); const r = await base(TABLE_TEMPLATES).select().all(); res.json(r.map(x => ({ id: x.id, name: x.get('Name'), status: x.get('Status'), body: x.get('Body'), variableMapping: x.get('VariableMapping') ? JSON.parse(x.get('VariableMapping') as string) : {} }))); });
 app.post('/api/create-template', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { const { name, category, body, language, footer, variableExamples } = req.body; let metaId = "meta_simulado_" + Date.now(); let status = "PENDING"; if (waToken && waBusinessId) { try { const metaPayload: any = { name, category, allow_category_change: true, language, components: [{ type: "BODY", text: body }] }; if (footer) metaPayload.components.push({ type: "FOOTER", text: footer }); const metaRes = await axios.post(`https://graph.facebook.com/v18.0/${waBusinessId}/message_templates`, metaPayload, { headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' } }); metaId = metaRes.data.id; status = metaRes.data.status || "PENDING"; } catch (metaError: any) { status = "REJECTED"; } } const createdRecords = await base(TABLE_TEMPLATES).create([{ fields: { "Name": name, "Category": category, "Language": language, "Body": body, "Footer": footer, "Status": status, "MetaId": metaId, "VariableMapping": JSON.stringify(variableExamples || {}) } }]); res.json({ success: true, template: { id: createdRecords[0].id, name, category, language, body, footer, status, variableMapping: variableExamples } }); } catch (error: any) { res.status(400).json({ success: false, error: error.message }); } });
 app.delete('/api/delete-template/:id', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error" }); } });
@@ -461,11 +447,10 @@ io.on('connection', (socket) => {
   socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
   socket.on('delete_agent', async (d) => { if (!base) return; await base('Agents').destroy([d.agentId]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Eliminado'); });
   socket.on('update_agent', async (d) => { if (!base) return; const f: any = { "name": d.updates.name, "role": d.updates.role }; if (d.updates.password !== undefined) f["password"] = d.updates.password; await base('Agents').update([{ id: d.agentId, fields: f }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Actualizado'); });
-  
   socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [] }))); } });
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
-  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
+  socket.on('chatMessage', async (msg) => { const targetPhone = cleanNumber(msg.targetPhone || process.env.TEST_TARGET_PHONE); if (waToken && waPhoneId) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${waPhoneId}/messages`, { messaging_product: "whatsapp", to: targetPhone, type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${waToken}` } }); } else { console.log("📝 Nota interna guardada"); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: targetPhone, timestamp: new Date().toISOString(), type: msg.type || 'text' }); const previewText = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú (${msg.sender}): ${msg.text}`; await handleContactUpdate(targetPhone, previewText); } catch (error: any) { console.error("Error envío:", error.message); } } });
 
   socket.on('trigger_ai_manual', async (data) => {
     const { phone } = data;
