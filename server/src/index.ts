@@ -9,7 +9,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor FINAL (Fix Types)...");
+console.log("🚀 [BOOT] Arrancando servidor (Fix Minúsculas)...");
 dotenv.config();
 
 const app = express();
@@ -252,7 +252,7 @@ app.post('/webhook', async (req, res) => {
 // Appointments
 app.get('/api/appointments', async (req, res) => { if (!base) return res.sendStatus(500); const r = await base('Appointments').select({ sort: [{ field: "Date", direction: "asc" }] }).all(); res.json(r.map(x => ({ id: x.id, date: x.get('Date'), status: x.get('Status'), clientPhone: x.get('ClientPhone'), clientName: x.get('ClientName') }))); });
 app.post('/api/appointments', async (req, res) => { if (!base) return res.sendStatus(500); await base('Appointments').create([{ fields: { "Date": req.body.date, "Status": "Available" } }]); res.json({success:true}); });
-app.put('/api/appointments/:id', async (req, res) => { if (!base) return res.sendStatus(500); const f:any={}; if(req.body.status)f["Status"]=req.body.status; if(req.body.clientPhone!==undefined)f["ClientPhone"]=req.body.clientPhone; await base('Appointments').update([{ id: req.params.id, fields: f }]); res.json({success:true}); });
+app.put('/api/appointments/:id', async (req, res) => { if (!base) return res.sendStatus(500); const f:any={}; if(req.body.status)f["Status"]=req.body.status; if(req.body.clientPhone!==undefined)f["ClientPhone"]=req.body.clientPhone; if(req.body.clientName!==undefined)f["ClientName"]=req.body.clientName; await base('Appointments').update([{ id: req.params.id, fields: f }]); res.json({success:true}); });
 app.delete('/api/appointments/:id', async (req, res) => { if (!base) return res.sendStatus(500); await base('Appointments').destroy([req.params.id]); res.json({success:true}); });
 app.post('/api/appointments/generate', async (req, res) => { 
     if (!base) return res.sendStatus(500); 
@@ -311,12 +311,13 @@ async function saveAndEmitMessage(msg: any) {
 
 // --- SOCKETS ---
 io.on('connection', (socket) => {
-  // ... (Tus sockets anteriores) ...
-  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('Name'), type: x.get('Type') }))); } });
-  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "Name": data.name, "Type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
-  socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Eliminado correctamente'); } });
-  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "Name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Actualizado correctamente'); } });
-  
+  // CONFIGURACIÓN (ARREGLADO: 'name' y 'type' minúsculas como en tu foto)
+  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
+  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Añadido correctamente'); } });
+  socket.on('delete_config', async (id) => { if (base) { await base('Config').destroy([id]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Eliminado correctamente'); } });
+  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); socket.emit('action_success', 'Actualizado correctamente'); } });
+
+  // Quick Replies (Estos suelen estar en Mayúscula en Airtable por defecto, pero si los cambiaste, ajusta aquí)
   socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
@@ -344,6 +345,9 @@ io.on('connection', (socket) => {
     }
   });
   socket.on('stop_ai_manual', (d) => { activeAiChats.delete(cleanNumber(d.phone)); io.emit('ai_active_change', { phone: cleanNumber(d.phone), active: false }); });
+  socket.on('register_presence', (u: string) => { if (u) { onlineUsers.set(socket.id, u); io.emit('online_users_update', Array.from(new Set(onlineUsers.values()))); } });
+  socket.on('disconnect', () => { if (onlineUsers.has(socket.id)) { onlineUsers.delete(socket.id); io.emit('online_users_update', Array.from(new Set(onlineUsers.values()))); } });
+  socket.on('typing', (d) => { socket.broadcast.emit('remote_typing', d); });
 });
 
 httpServer.listen(PORT, () => { console.log(`🚀 Servidor Listo ${PORT}`); });
