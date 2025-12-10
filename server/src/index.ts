@@ -252,7 +252,7 @@ HOY ES: ${now}.
         ];
 
         const runner = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: messages as any,
             tools: [
                 {
@@ -340,7 +340,7 @@ HOY ES: ${now}.
             }
 
             const secondResponse = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gpt-4o",
                 messages: [
                     ...messages,
                     msg,
