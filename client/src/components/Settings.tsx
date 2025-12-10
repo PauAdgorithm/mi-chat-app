@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
   LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3,
-  Calendar // <--- Icono Importado
+  Calendar, Bot, Save 
 } from 'lucide-react';
 
 // @ts-ignore
@@ -10,7 +10,7 @@ import WhatsAppTemplatesManager from './WhatsAppTemplatesManager';
 // @ts-ignore
 import AnalyticsDashboard from './AnalyticsDashboard';
 // @ts-ignore
-import CalendarDashboard from './CalendarDashboard'; // <--- Componente Importado
+import CalendarDashboard from './CalendarDashboard';
 
 interface SettingsProps {
   onBack: () => void;
@@ -23,15 +23,13 @@ interface Agent { id: string; name: string; role: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
 export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }: SettingsProps) {
-  // AÑADIDO 'agenda' AL STATE
-  const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda'>('team');
+  const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda' | 'bot_config'>('team');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showMobileMenu, setShowMobileMenu] = useState(true);
 
-  // Estados modal
   const [modalType, setModalType] = useState<'none' | 'create_agent' | 'edit_agent' | 'delete_agent' | 'add_config' | 'edit_config' | 'delete_config' | 'add_quick_reply' | 'edit_quick_reply' | 'delete_quick_reply'>('none');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   
@@ -42,6 +40,11 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
   const [qrTitle, setQrTitle] = useState('');
   const [qrContent, setQrContent] = useState('');
   const [qrShortcut, setQrShortcut] = useState('');
+
+  const [botPrompt, setBotPrompt] = useState('');
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
+  const isProduction = window.location.hostname.includes('render.com');
+  const API_URL = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
 
   useEffect(() => {
     if (socket) {
@@ -54,6 +57,30 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
     }
     return () => { socket?.off('agents_list'); socket?.off('config_list'); socket?.off('action_error'); socket?.off('action_success'); };
   }, [socket]);
+
+  useEffect(() => {
+      if (activeTab === 'bot_config') {
+          setIsLoadingPrompt(true);
+          fetch(`${API_URL}/bot-config`)
+            .then(res => res.json())
+            .then(data => { setBotPrompt(data.prompt); setIsLoadingPrompt(false); })
+            .catch(() => setIsLoadingPrompt(false));
+      }
+  }, [activeTab]);
+
+  const handleSavePrompt = async () => {
+      setIsLoadingPrompt(true);
+      try {
+          await fetch(`${API_URL}/bot-config`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ prompt: botPrompt })
+          });
+          setSuccess("Prompt actualizado correctamente");
+          setTimeout(() => setSuccess(''), 3000);
+      } catch (e) { setError("Error al guardar"); }
+      finally { setIsLoadingPrompt(false); }
+  };
 
   const closeModal = () => { setModalType('none'); setFormName(''); setFormPass(''); setError(''); setSelectedItem(null); setQrTitle(''); setQrContent(''); setQrShortcut(''); };
   const openCreateAgent = () => { setModalType('create_agent'); setFormName(''); setFormRole('Ventas'); setFormPass(''); };
@@ -75,7 +102,10 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
           case 'delete_agent': socket.emit('delete_agent', { agentId: selectedItem.id }); break;
           case 'add_config': socket.emit('add_config', { name: formName, type: formType }); break;
           case 'edit_config': socket.emit('update_config', { id: selectedItem.id, name: formName }); break;
-          case 'delete_config': socket.emit('delete_config', { id: selectedItem.id }); break;
+          
+          // FIX DELETION: Enviar solo ID, no objeto
+          case 'delete_config': socket.emit('delete_config', selectedItem.id); break;
+          
           case 'add_quick_reply': socket.emit('add_quick_reply', { title: qrTitle, content: qrContent, shortcut: qrShortcut }); break;
           case 'edit_quick_reply': socket.emit('update_quick_reply', { id: selectedItem.id, title: qrTitle, content: qrContent, shortcut: qrShortcut }); break;
           case 'delete_quick_reply': socket.emit('delete_quick_reply', selectedItem.id); break;
@@ -101,6 +131,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
       case 'quick_replies': return 'Respuestas Rápidas';
       case 'analytics': return 'Analíticas';
       case 'agenda': return 'Agenda';
+      case 'bot_config': return 'Configuración IA';
     }
   };
 
@@ -112,15 +143,15 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
       </div>
       <div className="flex flex-1 overflow-hidden relative">
           <div className={`absolute inset-0 bg-white z-10 flex flex-col p-4 space-y-2 transition-transform duration-300 md:relative md:translate-x-0 md:w-64 md:border-r md:border-gray-200 ${!showMobileMenu ? '-translate-x-full' : 'translate-x-0'}`}>
-              
-              {/* BOTÓN ANALÍTICAS */}
               <button onClick={() => handleTabClick('analytics')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><BarChart3 className="w-5 h-5" /> Analíticas</button>
               
               <div className="h-px bg-slate-100 my-2"></div>
 
-              {/* BOTÓN AGENDA - ¡AQUÍ ESTÁ! */}
               <button onClick={() => handleTabClick('agenda')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'agenda' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><Calendar className="w-5 h-5" /> Agenda</button>
-              
+              <button onClick={() => handleTabClick('bot_config')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'bot_config' ? 'bg-teal-50 text-teal-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><Bot className="w-5 h-5" /> Configurar IA</button>
+
+              <div className="h-px bg-slate-100 my-2"></div>
+
               <button onClick={() => handleTabClick('team')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'team' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><User className="w-5 h-5" /> Gestión de Equipo</button>
               <button onClick={() => handleTabClick('config')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'config' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><LayoutList className="w-5 h-5" /> Ajustes CRM</button>
               <button onClick={() => handleTabClick('whatsapp')} className={`w-full flex items-center gap-3 p-4 rounded-xl text-sm font-bold transition-all ${activeTab === 'whatsapp' ? 'bg-green-50 text-green-600' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`}><MessageSquare className="w-5 h-5" /> Plantillas WhatsApp</button>
@@ -144,11 +175,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
                   </div>
               )}
 
-              {activeTab === 'whatsapp' && (
-                  <div className="max-w-5xl mx-auto">
-                      <WhatsAppTemplatesManager />
-                  </div>
-              )}
+              {activeTab === 'whatsapp' && <div className="max-w-5xl mx-auto"><WhatsAppTemplatesManager /></div>}
               
               {activeTab === 'quick_replies' && (
                   <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -158,14 +185,22 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
               )}
 
               {activeTab === 'analytics' && <div className="h-full"><AnalyticsDashboard /></div>}
-              
-              {/* PESTAÑA AGENDA - RENDERIZADO */}
               {activeTab === 'agenda' && <div className="h-full"><CalendarDashboard /></div>}
+              
+              {activeTab === 'bot_config' && (
+                  <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="mb-6"><h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Bot className="w-6 h-6 text-teal-600" /> Configuración del Cerebro IA</h2><p className="text-sm text-slate-500">Define la personalidad, reglas y tono del asistente virtual.</p></div>
+                      {isLoadingPrompt ? (<div className="p-10 text-center text-slate-400"><RefreshCw className="animate-spin inline mr-2"/> Cargando prompt...</div>) : (
+                          <div className="space-y-4"><label className="text-xs font-bold text-slate-400 uppercase block">Instrucciones del Sistema (System Prompt)</label><textarea value={botPrompt} onChange={(e) => setBotPrompt(e.target.value)} className="w-full h-96 p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-700 focus:ring-2 focus:ring-teal-500 outline-none resize-none leading-relaxed" placeholder="Escribe aquí las instrucciones para la IA..."/>
+                              <div className="flex justify-end"><button onClick={handleSavePrompt} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg shadow-teal-100 active:scale-95 transition-all flex items-center gap-2"><Save size={18}/> Guardar Cambios</button></div>
+                          </div>
+                      )}
+                  </div>
+              )}
 
           </div>
       </div>
       
-      {/* MODAL (IGUAL QUE ANTES + QUICK REPLIES) */}
       {modalType !== 'none' && (
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in backdrop-blur-sm">
               <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-2xl p-6 animate-in slide-in-from-bottom-10 md:zoom-in-95 max-h-[90vh] overflow-y-auto">
@@ -173,15 +208,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [] }:
                   <form onSubmit={handleSubmit} className="space-y-5 pb-safe">
                       {(modalType.includes('agent') && !modalType.includes('delete')) && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: Laura" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Rol</label><select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"><option value="Ventas">Ventas</option><option value="Taller">Taller</option><option value="Admin">Admin</option></select></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contraseña</label><input type="password" value={formPass} onChange={e => setFormPass(e.target.value)} placeholder={modalType === 'edit_agent' ? "Nueva contraseña (Opcional)" : "Contraseña (Opcional)"} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" /></div></>)}
                       {(modalType.includes('config') && !modalType.includes('delete')) && (<div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre {formType === 'Department' ? 'Departamento' : formType === 'Status' ? 'Estado' : 'Etiqueta'}</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: VIP" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>)}
-                      
-                      {(modalType === 'add_quick_reply' || modalType === 'edit_quick_reply') && (
-                          <>
-                            <div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Título</label><input value={qrTitle} onChange={e => setQrTitle(e.target.value)} placeholder="Ej: Bienvenida" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>
-                            <div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contenido</label><textarea value={qrContent} onChange={e => setQrContent(e.target.value)} placeholder="El texto que se enviará..." rows={4} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none" required /></div>
-                            <div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Atajo (Opcional)</label><input value={qrShortcut} onChange={e => setQrShortcut(e.target.value)} placeholder="Ej: /hola" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono" /></div>
-                          </>
-                      )}
-
+                      {(modalType === 'add_quick_reply' || modalType === 'edit_quick_reply') && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Título</label><input value={qrTitle} onChange={e => setQrTitle(e.target.value)} placeholder="Ej: Bienvenida" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contenido</label><textarea value={qrContent} onChange={e => setQrContent(e.target.value)} placeholder="El texto que se enviará..." rows={4} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Atajo (Opcional)</label><input value={qrShortcut} onChange={e => setQrShortcut(e.target.value)} placeholder="Ej: /hola" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono" /></div></>)}
                       {(modalType.includes('delete')) && <div className="bg-red-50 p-4 rounded-xl text-red-600 text-sm font-medium border border-red-100">¿Estás seguro? Esta acción es irreversible.</div>}
                       <button type="submit" className={`w-full py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition-transform ${modalType.includes('delete') ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-200'}`}>Confirmar Acción</button>
                   </form>
