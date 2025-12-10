@@ -7,7 +7,8 @@ import {
   UserCheck, 
   Calendar,
   AlertCircle,
-  Loader2
+  Loader2,
+  ServerCrash
 } from 'lucide-react';
 
 const AnalyticsDashboard = () => {
@@ -17,6 +18,7 @@ const AnalyticsDashboard = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [missingData, setMissingData] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/analytics`)
@@ -26,7 +28,12 @@ const AnalyticsDashboard = () => {
           return json;
       })
       .then(d => {
-        setData(d);
+        // Verificamos si el servidor envió los KPIs o está vacío
+        if (!d || !d.kpis) {
+            setMissingData(true);
+        } else {
+            setData(d);
+        }
         setLoading(false);
       })
       .catch(err => {
@@ -36,7 +43,7 @@ const AnalyticsDashboard = () => {
       });
   }, []);
 
-  // --- Renderizado de Estados de Carga y Error ---
+  // --- Renderizado de Estados ---
 
   if (loading) {
     return (
@@ -51,13 +58,26 @@ const AnalyticsDashboard = () => {
     return (
         <div className="w-full p-8 flex flex-col items-center justify-center text-center bg-red-50 rounded-2xl border border-red-100">
             <AlertCircle className="text-red-400 mb-3" size={48} />
-            <h3 className="text-lg font-bold text-slate-700">No se pudieron cargar las analíticas</h3>
+            <h3 className="text-lg font-bold text-slate-700">Error de conexión</h3>
             <p className="text-sm text-slate-500 mt-1 max-w-md">{error}</p>
-            <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-bold hover:bg-slate-50 transition">
-                Reintentar
-            </button>
+            <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-bold hover:bg-slate-50 transition">Reintentar</button>
         </div>
     );
+  }
+
+  // AVISO ESPECÍFICO: El servidor responde pero sin datos (Ruta vacía)
+  if (missingData) {
+      return (
+        <div className="w-full p-8 flex flex-col items-center justify-center text-center bg-yellow-50 rounded-2xl border border-yellow-100">
+            <ServerCrash className="text-yellow-500 mb-3" size={48} />
+            <h3 className="text-lg font-bold text-slate-700">Falta Lógica en el Servidor</h3>
+            <p className="text-sm text-slate-600 mt-2 max-w-md">
+                La ruta <code>/api/analytics</code> existe pero devuelve datos vacíos. 
+                <br/>Probablemente copiaste una versión resumida del archivo <code>index.ts</code>.
+            </p>
+            <p className="text-xs text-slate-400 mt-4">Copia y pega el bloque de código de Analíticas en tu servidor.</p>
+        </div>
+      );
   }
 
   // --- Preparación de Datos Seguros ---
@@ -71,8 +91,6 @@ const AnalyticsDashboard = () => {
   const maxActivity = Math.max(...(activity.map((d:any) => d.count) || [0]), 1);
 
   return (
-    // ELIMINADO: h-full y overflow-y-auto para evitar conflicto con Settings.tsx
-    // Ahora es un contenedor fluido que se adapta al padre
     <div className="max-w-6xl mx-auto space-y-8 pb-10">
         
         {/* Header */}
@@ -124,7 +142,7 @@ const AnalyticsDashboard = () => {
                   <div className="w-full bg-slate-100 rounded-t-lg relative overflow-hidden transition-all hover:bg-indigo-50 flex-1 flex items-end">
                     <div 
                       className="w-full bg-indigo-500 rounded-t-lg transition-all duration-500 group-hover:bg-indigo-600 relative"
-                      style={{ height: `${heightPercent || 1}%` }} // Mínimo 1% para que se vea algo
+                      style={{ height: `${heightPercent || 1}%` }}
                     ></div>
                   </div>
                   {/* Tooltip */}
