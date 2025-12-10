@@ -60,10 +60,25 @@ const AnalyticsDashboard = () => {
     );
   }
 
-  if (!data || !data.kpis) return null;
+  // --- PROTECCIÓN CONTRA PANTALLA BLANCA ---
+  // Si data es null o vacío, usamos valores por defecto para que pinte algo
+  const safeData = data || {};
+  const kpis = safeData.kpis || { totalMessages: 0, totalContacts: 0, newLeads: 0 };
+  const activity = safeData.activity || [];
+  const agents = safeData.agents || [];
+  const statuses = safeData.statuses || [];
 
   // Escalar gráfica (evitar división por cero)
-  const maxActivity = Math.max(...(data.activity?.map((d:any) => d.count) || [0]), 1);
+  const maxActivity = Math.max(...(activity.map((d:any) => d.count) || [0]), 1);
+
+  if (!data && !loading && !error) {
+     return (
+        <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8">
+            <p>No se han recibido datos del servidor.</p>
+            <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm">Recargar</button>
+        </div>
+     );
+  }
 
   return (
     <div className="p-8 h-full overflow-y-auto bg-slate-50">
@@ -83,7 +98,7 @@ const AnalyticsDashboard = () => {
             <div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><MessageSquare size={24} /></div>
             <div>
               <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">Total Mensajes</p>
-              <h3 className="text-3xl font-bold text-slate-800">{data.kpis.totalMessages}</h3>
+              <h3 className="text-3xl font-bold text-slate-800">{kpis.totalMessages}</h3>
             </div>
           </div>
 
@@ -91,7 +106,7 @@ const AnalyticsDashboard = () => {
             <div className="p-3 bg-purple-50 text-purple-600 rounded-xl"><Users size={24} /></div>
             <div>
               <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">Contactos Totales</p>
-              <h3 className="text-3xl font-bold text-slate-800">{data.kpis.totalContacts}</h3>
+              <h3 className="text-3xl font-bold text-slate-800">{kpis.totalContacts}</h3>
             </div>
           </div>
 
@@ -99,7 +114,7 @@ const AnalyticsDashboard = () => {
             <div className="p-3 bg-green-50 text-green-600 rounded-xl"><TrendingUp size={24} /></div>
             <div>
               <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">Nuevos Leads</p>
-              <h3 className="text-3xl font-bold text-slate-800">{data.kpis.newLeads}</h3>
+              <h3 className="text-3xl font-bold text-slate-800">{kpis.newLeads}</h3>
             </div>
           </div>
         </div>
@@ -111,7 +126,7 @@ const AnalyticsDashboard = () => {
           </h3>
           
           <div className="h-48 flex items-end justify-between gap-2">
-            {data.activity && data.activity.map((day: any, i: number) => {
+            {activity.length > 0 ? activity.map((day: any, i: number) => {
               const heightPercent = (day.count / maxActivity) * 100;
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
@@ -128,7 +143,7 @@ const AnalyticsDashboard = () => {
                   <span className="text-xs text-slate-400 font-medium truncate w-full text-center">{day.label}</span>
                 </div>
               );
-            })}
+            }) : <div className="w-full text-center text-slate-400 py-10">No hay actividad reciente</div>}
           </div>
         </div>
 
@@ -141,7 +156,7 @@ const AnalyticsDashboard = () => {
               <UserCheck size={18} className="text-slate-400"/> Productividad Agentes
             </h3>
             <div className="space-y-3">
-              {data.agents && data.agents.length > 0 ? data.agents.map((agent: any, i: number) => (
+              {agents.length > 0 ? agents.map((agent: any, i: number) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-50 hover:border-slate-100 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">
@@ -168,7 +183,7 @@ const AnalyticsDashboard = () => {
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
              <h3 className="font-bold text-slate-700 mb-4">Estado de los Chats</h3>
              <div className="space-y-4">
-                {data.statuses && data.statuses.map((st: any, i: number) => (
+                {statuses.length > 0 ? statuses.map((st: any, i: number) => (
                   <div key={i}>
                     <div className="flex justify-between text-xs font-bold text-slate-500 mb-1.5">
                       <span>{st.name}</span>
@@ -177,12 +192,11 @@ const AnalyticsDashboard = () => {
                     <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                       <div 
                         className={`h-full rounded-full transition-all duration-1000 ${st.name === 'Nuevo' ? 'bg-green-500' : st.name === 'Abierto' ? 'bg-blue-500' : 'bg-slate-400'}`} 
-                        style={{ width: `${(st.count / (data.kpis.totalContacts || 1)) * 100}%` }}
+                        style={{ width: `${(st.count / (kpis.totalContacts || 1)) * 100}%` }}
                       ></div>
                     </div>
                   </div>
-                ))}
-                {(!data.statuses || data.statuses.length === 0) && <p className="text-sm text-slate-400 italic py-4 text-center">No hay estados registrados.</p>}
+                )) : <p className="text-sm text-slate-400 italic py-4 text-center">No hay estados registrados.</p>}
              </div>
           </div>
 
