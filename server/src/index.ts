@@ -280,7 +280,81 @@ app.get('/api/templates', async (req, res) => { if(!base) return res.sendStatus(
 app.post('/api/create-template', async (req, res) => { if(!base) return res.sendStatus(500); /* ... */ res.json({success:true}); }); // (Resumido para brevedad, mantener lógica anterior si se usa)
 app.delete('/api/delete-template/:id', async (req, res) => { if(!base) return res.sendStatus(500); await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({success:true}); });
 app.post('/api/send-template', async (req, res) => { if(!waToken) return res.sendStatus(500); /* ... */ res.json({success:true}); });
-app.get('/api/analytics', async (req, res) => { if(!base) return res.sendStatus(500); /* ... */ res.json({}); });
+app.get('/api/analytics', async (req, res) => {
+    if (!base) return res.status(500).json({ error: "Airtable no conectado" });
+    
+    try {
+        // 1. Cargar datos crudos
+        const contacts = await base('Contacts').select().all();
+        const messages = await base('Messages').select().all();
+        
+        // 2. Calcular KPIs Generales
+        const totalContacts = contacts.length;
+        const totalMessages = messages.length;
+        // Cuenta cuántos tienen status 'Nuevo'
+        const newLeads = contacts.filter(c => c.get('status') === 'Nuevo').length;
+        
+        // 3. Actividad últimos 7 días
+        const last7Days = [...Array(7)].map((_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            return d.toISOString().split('T')[0];
+        }).reverse();
+
+        const activityData = last7Days.map(date => {
+            const count = messages.filter(m => {
+                const mDate = (m.get('timestamp') as string || "").split('T')[0];
+                return mDate === date;
+            }).length;
+            const label = new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+            return { date, label, count };
+        });
+
+        // 4. Rendimiento por Agente
+        const agentStats: Record<string, { msgs: number, uniqueChats: Set<string> }> = {};
+        messages.forEach(m => {
+            const sender = (m.get('sender') as string) || "";
+            const recipient = (m.get('recipient') as string) || "";
+            const isPhone = /^\d+$/.test(sender.replace(/\D/g, '')); 
+            
+            // Si el remitente NO es un número (es un agente)
+            if (!isPhone && sender.toLowerCase() !== 'sistema' && sender.trim() !== '') {
+                if (!agentStats[sender]) agentStats[sender] = { msgs: 0, uniqueChats: new Set() };
+                agentStats[sender].msgs += 1;
+                if (recipient) agentStats[sender].uniqueChats.add(recipient);
+            }
+        });
+
+        const agentPerformance = Object.entries(agentStats)
+            .map(([name, data]) => ({ 
+                name, 
+                msgCount: data.msgs,
+                chatCount: data.uniqueChats.size 
+            }))
+            .sort((a, b) => b.msgCount - a.msgCount)
+            .slice(0, 5);
+
+        // 5. Distribución por Estado
+        const statusMap: Record<string, number> = {};
+        contacts.forEach(c => {
+            const s = (c.get('status') as string) || 'Otros';
+            statusMap[s] = (statusMap[s] || 0) + 1;
+        });
+        const statusDistribution = Object.entries(statusMap).map(([name, count]) => ({ name, count }));
+
+        // RESPUESTA COMPLETA (Esto es lo que faltaba)
+        res.json({
+            kpis: { totalContacts, totalMessages, newLeads },
+            activity: activityData,
+            agents: agentPerformance,
+            statuses: statusDistribution
+        });
+
+    } catch (error: any) {
+        console.error("❌ Error calculando analíticas:", error);
+        res.status(500).json({ error: "Error interno en analíticas" });
+    }
+});
 app.post('/api/upload', upload.single('file'), async (req:any, res:any) => { /* ... */ res.json({success:true}); });
 app.get('/api/media/:id', async (req, res) => { /* ... */ });
 
