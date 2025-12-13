@@ -12,13 +12,8 @@ import {
   Hash,
   CheckCircle,
   Calendar as CalendarIcon,
-  Smartphone,
-  UserPlus,
-  Upload,
-  FileSpreadsheet
+  Smartphone 
 } from 'lucide-react';
-
-// --- INTERFACES ---
 
 export interface Contact {
   id: string;
@@ -35,19 +30,11 @@ export interface Contact {
   notes?: string;
   signup_date?: string; 
   tags?: string[];
-  origin_phone_id?: string; // Campo crítico para Multi-Cuenta
+  origin_phone_id?: string;
 }
 
-interface Agent { 
-    id: string; 
-    name: string; 
-}
-
-interface ConfigItem { 
-    id: string; 
-    name: string; 
-    type: string; 
-}
+interface Agent { id: string; name: string; }
+interface ConfigItem { id: string; name: string; type: string; }
 
 interface SidebarProps {
   user: { username: string, role: string; preferences?: any };
@@ -66,8 +53,6 @@ interface SidebarProps {
 
 type ViewScope = 'all' | 'mine' | 'unassigned';
 
-// --- HELPERS ---
-
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
@@ -77,65 +62,37 @@ const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try {
         const date = new Date(isoString);
-        // Validación extra para evitar "Invalid Date"
         if (isNaN(date.getTime())) return '';
         
         const today = new Date();
-        const isToday = date.getDate() === today.getDate() &&
-                        date.getMonth() === today.getMonth() &&
-                        date.getFullYear() === today.getFullYear();
-
-        if (isToday) {
+        if (date.toDateString() === today.toDateString()) {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-    } catch { 
-        return ''; 
-    }
+    } catch { return ''; }
 };
 
-const getInitial = (name?: any, phone?: any) => {
-    const display = name || phone || "?";
-    return String(display).charAt(0).toUpperCase();
-};
+const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
 
 const cleanMessagePreview = (msg: any) => {
     if (!msg) return "Haz clic para ver";
-    if (typeof msg === 'string') {
-        if (msg.includes('[object Object]')) return "Mensaje";
-        return msg;
-    }
+    if (typeof msg === 'string') return msg.includes('[object Object]') ? "Mensaje" : msg;
     if (typeof msg === 'object') return "Mensaje";
     return String(msg);
 };
 
-// --- COMPONENTE PRINCIPAL ---
-
-export function Sidebar({ 
-    user, 
-    socket, 
-    onSelectContact, 
-    selectedContactId, 
-    isConnected = true, 
-    onlineUsers = [], 
-    typingStatus = {}, 
-    setView, 
-    selectedAccountId, 
-    onSelectAccount 
-}: SidebarProps) {
+export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView, selectedAccountId, onSelectAccount }: SidebarProps) {
   
-  // --- URL API (Para evitar errores 404 al pedir cuentas en producción) ---
+  // --- URL DE LA API ---
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
 
-  // --- ESTADOS DE DATOS ---
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); // Lista de números
-  
-  // --- ESTADOS DE UI Y FILTROS ---
+  // 1. ESTADOS
   const [viewScope, setViewScope] = useState<ViewScope>('all'); 
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); 
   
   const [activeFilters, setActiveFilters] = useState({
       department: '',
@@ -144,52 +101,32 @@ export function Sidebar({
       agent: ''
   });
   
-  // --- LISTAS PARA DESPLEGABLES ---
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
   const [availableDepts, setAvailableDepts] = useState<string[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
 
-  // --- ESTADOS AUXILIARES ---
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // --- ESTADOS PARA MODALES DE CONTACTOS ---
-  const [showAddContact, setShowAddContact] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  
-  // Formulario Nuevo Contacto
-  const [newContactPhone, setNewContactPhone] = useState('');
-  const [newContactName, setNewContactName] = useState('');
-  const [newContactEmail, setNewContactEmail] = useState('');
-  
-  // Importación
-  const [importFile, setImportFile] = useState<File|null>(null);
-  const [importing, setImporting] = useState(false);
-
-  // --- EFECTO 1: CARGA INICIAL DE DATOS ---
+  // 2. CARGA INICIAL
   useEffect(() => {
     if (socket && isConnected) {
-        console.log("🔄 Sidebar: Solicitando datos iniciales...");
         socket.emit('request_contacts');
         socket.emit('request_agents'); 
         socket.emit('request_config'); 
         
-        // Cargar cuentas disponibles para el selector Multi-Cuenta
         fetch(`${API_URL}/accounts`)
             .then(r => {
                 if (!r.ok) throw new Error("Error cargando cuentas");
                 return r.json();
             })
-            .then(data => {
-                console.log("📱 Cuentas cargadas:", data);
-                setAccounts(data);
-            })
+            .then(setAccounts)
             .catch(err => console.error("Error fetching accounts:", err));
     }
   }, [socket, isConnected]);
 
-  // --- EFECTO 2: LIMPIAR NO LEÍDOS AL SELECCIONAR CHAT ---
+  // Limpiar unread al seleccionar
   useEffect(() => {
       if (selectedContactId) {
           const contact = contacts.find(c => c.id === selectedContactId);
@@ -204,21 +141,15 @@ export function Sidebar({
       }
   }, [selectedContactId, contacts]);
 
-  // --- EFECTO 3: LISTENERS DEL SOCKET Y NOTIFICACIONES ---
+  // 3. LISTENERS DEL SOCKET
   useEffect(() => {
-    // Inicializar audio
     audioRef.current = new Audio('/notification.mp3');
-    if (Notification.permission !== 'granted') {
-        Notification.requestPermission();
-    }
+    if (Notification.permission !== 'granted') Notification.requestPermission();
 
     if (!socket) return;
 
-    // Handlers
     const handleContactsUpdate = (newContacts: any) => {
-      if (Array.isArray(newContacts)) {
-          setContacts(newContacts);
-      }
+      if (Array.isArray(newContacts)) setContacts(newContacts);
     };
 
     const handleAgentsList = (list: Agent[]) => setAvailableAgents(list);
@@ -229,21 +160,15 @@ export function Sidebar({
         setAvailableTags(list.filter(i => i.type === 'Tag').map(i => i.name));
     };
 
-    // Suscripciones
     socket.on('contacts_update', handleContactsUpdate);
     socket.on('agents_list', handleAgentsList);     
     socket.on('config_list', handleConfigList);     
-    socket.on('contact_updated_notification', () => {
-        console.log("🔔 Notificación de actualización recibida");
-        socket.emit('request_contacts');
-    });
+    socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
 
-    // Lógica de Notificaciones Inteligente
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
-        
         if (!isMe) {
-            // Filtrado de notificaciones por preferencias de usuario
+            // Lógica de Notificación Inteligente
             let shouldNotify = true;
             const prefs = user.preferences || {};
 
@@ -255,7 +180,7 @@ export function Sidebar({
                  }
             }
             
-            // 2. Filtro Línea Telefónica (Multi-Cuenta)
+            // 2. Filtro Línea Telefónica
             if (prefs.phoneIds && prefs.phoneIds.length > 0) {
                 if (msg.origin_phone_id && !prefs.phoneIds.includes(msg.origin_phone_id)) {
                     shouldNotify = false;
@@ -265,8 +190,7 @@ export function Sidebar({
             // 3. Filtro Nuevos Leads (Estado 'Nuevo')
             const isNewLead = contact?.status === 'Nuevo';
             if (isNewLead) {
-                // Si 'notifyNewLeads' es false, no suena. 
-                // Si es true o undefined (por defecto), suena.
+                // Si 'notifyNewLeads' es false, no suena. Si es true o undefined, suena.
                 if (prefs.notifyNewLeads === false) {
                     shouldNotify = false;
                 } else {
@@ -275,10 +199,9 @@ export function Sidebar({
             }
 
             if (shouldNotify) {
-                audioRef.current?.play().catch((e) => console.log("Error audio:", e));
+                audioRef.current?.play().catch(() => {});
             }
 
-            // Incrementar contador de no leídos
             const senderClean = normalizePhone(msg.sender);
             const currentContact = contacts.find(c => c.id === selectedContactId);
             const currentContactPhoneClean = currentContact ? normalizePhone(currentContact.phone) : null;
@@ -287,19 +210,15 @@ export function Sidebar({
                 setUnreadCounts(prev => ({ ...prev, [senderClean]: (prev[senderClean] || 0) + 1 }));
             }
         }
-        
-        // Siempre refrescamos la lista para ver el mensaje nuevo en el preview
         socket.emit('request_contacts');
     };
 
     socket.on('message', handleNewMessageNotification);
 
-    // Polling de seguridad (por si se pierde algún evento)
     const interval = setInterval(() => {
         if(isConnected) socket.emit('request_contacts');
     }, 10000);
 
-    // Cleanup
     return () => {
       socket.off('contacts_update', handleContactsUpdate);
       socket.off('agents_list', handleAgentsList);
@@ -310,80 +229,23 @@ export function Sidebar({
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts, user.preferences]);
 
-  // --- FUNCIONES GESTIÓN CONTACTOS ---
-
-  const handleCreateContact = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-          await fetch(`${API_URL}/contacts`, {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                  phone: newContactPhone,
-                  name: newContactName,
-                  email: newContactEmail,
-                  // Si no hay cuenta seleccionada, usa la primera disponible
-                  originPhoneId: selectedAccountId || (accounts.length > 0 ? accounts[0].id : undefined)
-              })
-          });
-          setShowAddContact(false);
-          setNewContactPhone(''); 
-          setNewContactName('');
-          setNewContactEmail('');
-          socket.emit('request_contacts');
-      } catch (e) { 
-          alert("Error al crear contacto"); 
-      }
-  };
-
-  const handleImport = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if(!importFile) return;
-      
-      setImporting(true);
-      const formData = new FormData();
-      formData.append('file', importFile);
-      formData.append('originPhoneId', selectedAccountId || (accounts.length > 0 ? accounts[0].id : ''));
-      
-      try {
-          const res = await fetch(`${API_URL}/contacts/import`, { method: 'POST', body: formData });
-          const d = await res.json();
-          if (d.success) {
-              alert(`Importación completada: ${d.count} contactos procesados.`);
-              setShowImport(false);
-              setImportFile(null);
-              socket.emit('request_contacts');
-          } else {
-              alert("Error en la importación: " + d.error);
-          }
-      } catch(e) { 
-          alert("Error de conexión al importar"); 
-      } finally { 
-          setImporting(false); 
-      }
-  };
-
-  // --- LÓGICA DE FILTRADO ---
+  // 5. LÓGICA DE FILTRADO
   const filteredContacts = contacts.filter(c => {
-      // 1. Filtro Multi-Cuenta
-      // Si hay una cuenta seleccionada, filtramos.
-      // IMPORTANTE: Si el contacto NO tiene 'origin_phone_id' (es antiguo), lo mostramos siempre para no perderlo.
-      if (selectedAccountId) {
-          if (c.origin_phone_id && c.origin_phone_id !== selectedAccountId) {
-              return false;
-          }
+      // Filtro Multi-Cuenta MEJORADO
+      // Si hay cuenta seleccionada, mostramos los que coinciden O los que no tienen dueño (huérfanos)
+      if (selectedAccountId && c.origin_phone_id && c.origin_phone_id !== selectedAccountId) {
+          return false;
       }
 
-      // 2. Filtro Búsqueda
-      const searchLower = searchQuery.toLowerCase();
-      const matchesSearch = (c.name || "").toLowerCase().includes(searchLower) || (c.phone || "").includes(searchLower);
+      // Filtro Búsqueda
+      const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // 3. Filtro Vistas (Tabs Superiores)
+      // Filtro Vistas
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
-      // 4. Filtros Avanzados (Desplegables)
+      // Filtros Avanzados
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
@@ -398,89 +260,46 @@ export function Sidebar({
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
-  // --- RENDERIZADO ---
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
       {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
         
-        {/* SELECTOR DE PERFIL (MULTI-CUENTA) Y BOTONES ACCIÓN */}
+        {/* SELECTOR DE PERFIL (MULTI-CUENTA) */}
         <div className="mb-4">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1 block">
-                Línea Activa
-            </label>
-            <div className="flex gap-2">
-                <div className="relative flex-1">
-                    <Smartphone className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                    <select 
-                        value={selectedAccountId || ''} 
-                        onChange={(e) => onSelectAccount(e.target.value || null)}
-                        className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
-                    >
-                        <option value="">Todas las Líneas (Global)</option>
-                        {accounts.map(acc => (
-                            <option key={acc.id} value={acc.id}>
-                                {acc.name} ({acc.id.slice(-4)})
-                            </option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-3 w-3 h-3 text-slate-400 pointer-events-none" />
-                </div>
-                
-                {/* Botones de Acción */}
-                <div className="flex gap-1">
-                    <button 
-                        onClick={() => setShowAddContact(true)} 
-                        className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition shadow-sm" 
-                        title="Nuevo Contacto Manual"
-                    >
-                        <UserPlus size={18}/>
-                    </button>
-                    <button 
-                        onClick={() => setShowImport(true)} 
-                        className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition shadow-sm" 
-                        title="Importar CSV"
-                    >
-                        <Upload size={18}/>
-                    </button>
-                </div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1 block">Línea Activa</label>
+            <div className="relative">
+                <Smartphone className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                <select 
+                    value={selectedAccountId || ''} 
+                    onChange={(e) => onSelectAccount(e.target.value || null)}
+                    className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
+                >
+                    <option value="">Todas las Líneas</option>
+                    {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>{acc.name} ({acc.id.slice(-4)})</option>
+                    ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-3 w-3 h-3 text-slate-400 pointer-events-none" />
             </div>
         </div>
 
-        {/* BUSCADOR */}
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
+            Bandeja de Entrada
+            {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
+        </h2>
+        
         <div className="relative mb-3">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-            <input 
-                type="text" 
-                placeholder="Buscar chat..." 
-                value={searchQuery} 
-                onChange={(e) => setSearchQuery(e.target.value)} 
-                className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-            />
+            <input type="text" placeholder="Buscar chat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
 
-        {/* PESTAÑAS Y FILTROS */}
         <div className="flex gap-2 items-center">
             <div className="flex bg-slate-100 p-1 rounded-lg flex-1">
-                <button 
-                    onClick={() => setViewScope('all')} 
-                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Todos
-                </button>
-                <button 
-                    onClick={() => setViewScope('mine')} 
-                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Míos
-                </button>
-                <button 
-                    onClick={() => setViewScope('unassigned')} 
-                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'unassigned' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Libres
-                </button>
+                <button onClick={() => setViewScope('all')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
+                <button onClick={() => setViewScope('mine')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'mine' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Míos</button>
+                <button onClick={() => setViewScope('unassigned')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${viewScope === 'unassigned' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Libres</button>
             </div>
             
             <button 
@@ -501,7 +320,6 @@ export function Sidebar({
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                    {/* DEPARTAMENTO */}
                     <div className="relative">
                         <select value={activeFilters.department} onChange={(e) => updateFilter('department', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Departamento</option>
@@ -510,7 +328,6 @@ export function Sidebar({
                         <Briefcase className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* ESTADO */}
                     <div className="relative">
                         <select value={activeFilters.status} onChange={(e) => updateFilter('status', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Estado</option>
@@ -519,7 +336,6 @@ export function Sidebar({
                         <CheckCircle className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* ETIQUETA */}
                     <div className="relative">
                         <select value={activeFilters.tag} onChange={(e) => updateFilter('tag', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Etiqueta</option>
@@ -528,7 +344,6 @@ export function Sidebar({
                         <Hash className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                     </div>
 
-                    {/* AGENTE */}
                     <div className="relative">
                         <select value={activeFilters.agent} onChange={(e) => updateFilter('agent', e.target.value)} className="w-full appearance-none pl-7 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:ring-1 focus:ring-blue-500 outline-none">
                             <option value="">Agente</option>
@@ -596,11 +411,10 @@ export function Sidebar({
                           ))}
                           {contact.tags && contact.tags.length > 2 && <span className="text-[9px] text-slate-400">+{contact.tags.length - 2}</span>}
                           
-                          {/* DEPARTAMENTO Y ASIGNADO */}
                           {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
                           {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
                           
-                          {/* BADGE MULTI-CUENTA (Solo si no hay filtro activo) */}
+                          {/* Línea Origen (Multi-Cuenta) */}
                           {!selectedAccountId && contact.origin_phone_id && (
                               <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-mono rounded border border-gray-200">
                                   #{contact.origin_phone_id.slice(-4)}
@@ -643,65 +457,6 @@ export function Sidebar({
               ))}
           </div>
       </div>
-
-      {/* MODAL CREAR CONTACTO */}
-      {showAddContact && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
-                  <h3 className="font-bold mb-4 text-slate-800 text-lg">Nuevo Contacto</h3>
-                  <form onSubmit={handleCreateContact} className="space-y-4">
-                      <div>
-                          <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Teléfono</label>
-                          <input required placeholder="Ej: 34600123456" value={newContactPhone} onChange={e=>setNewContactPhone(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Nombre</label>
-                          <input required placeholder="Ej: Juan Pérez" value={newContactName} onChange={e=>setNewContactName(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Email (Opcional)</label>
-                          <input placeholder="juan@email.com" value={newContactEmail} onChange={e=>setNewContactEmail(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                          <button type="button" onClick={()=>setShowAddContact(false)} className="flex-1 py-3 bg-gray-100 text-slate-600 font-bold rounded-xl hover:bg-gray-200 transition">Cancelar</button>
-                          <button type="submit" className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg transition">Crear</button>
-                      </div>
-                  </form>
-              </div>
-          </div>
-      )}
-
-      {/* MODAL IMPORTAR */}
-      {showImport && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center shadow-2xl">
-                  <div className="bg-green-50 p-4 rounded-full w-fit mx-auto mb-4">
-                      <FileSpreadsheet className="text-green-600" size={32} />
-                  </div>
-                  <h3 className="font-bold text-lg text-slate-800 mb-2">Importar Contactos (CSV)</h3>
-                  <p className="text-xs text-slate-400 mb-6 bg-slate-50 p-2 rounded-lg border border-slate-200 mx-auto w-fit">
-                      Formato requerido: <code>Teléfono, Nombre, Email</code>
-                  </p>
-                  
-                  <div className="relative mb-6">
-                      <input 
-                        type="file" 
-                        accept=".csv" 
-                        onChange={e => setImportFile(e.target.files?.[0] || null)} 
-                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 cursor-pointer" 
-                      />
-                  </div>
-
-                  <div className="flex gap-2">
-                      <button onClick={()=>setShowImport(false)} className="flex-1 py-3 bg-gray-100 text-slate-600 font-bold rounded-xl hover:bg-gray-200 transition">Cancelar</button>
-                      <button onClick={handleImport} disabled={!importFile || importing} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg disabled:opacity-50 transition">
-                          {importing ? 'Subiendo...' : 'Importar'}
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-
     </div>
   );
 }
