@@ -15,8 +15,6 @@ import {
   Smartphone 
 } from 'lucide-react';
 
-// --- EXPORTACIONES CLAVE (IMPORTANTE: MANTENER 'export') ---
-
 export interface Contact {
   id: string;
   phone: string;
@@ -62,12 +60,16 @@ const normalizePhone = (phone: string) => {
 
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView, selectedAccountId, onSelectAccount }: SidebarProps) {
   
+  // --- URL DE LA API (FIX 404) ---
+  const isProduction = window.location.hostname.includes('render.com');
+  const API_URL = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
+
   // 1. ESTADOS
   const [viewScope, setViewScope] = useState<ViewScope>('all'); 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); // Lista de números
+  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); 
   
   const [activeFilters, setActiveFilters] = useState({
       department: '',
@@ -90,8 +92,15 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         socket.emit('request_contacts');
         socket.emit('request_agents'); 
         socket.emit('request_config'); 
-        // Pedir cuentas
-        fetch('/api/accounts').then(r=>r.json()).then(setAccounts).catch(()=>{});
+        
+        // FIX: Usar URL absoluta para evitar 404
+        fetch(`${API_URL}/accounts`)
+            .then(r => {
+                if (!r.ok) throw new Error("Error cargando cuentas");
+                return r.json();
+            })
+            .then(setAccounts)
+            .catch(err => console.error("Error fetching accounts:", err));
     }
   }, [socket, isConnected]);
 
@@ -166,14 +175,11 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
   // 4. HELPERS
-  // ... imports ...
-
-// FUNCIÓN DE FECHA BLINDADA
-const formatTime = (isoString?: string) => {
+  const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try {
         const date = new Date(isoString);
-        if (isNaN(date.getTime())) return ''; // Si es inválida, no mostramos nada y evitamos "Invalid Date"
+        if (isNaN(date.getTime())) return '';
         
         const today = new Date();
         if (date.toDateString() === today.toDateString()) {
@@ -181,9 +187,8 @@ const formatTime = (isoString?: string) => {
         }
         return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
     } catch { return ''; }
-};
+  };
 
-// ... (Resto del componente igual)
   const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
 
   const cleanMessagePreview = (msg: any) => {
@@ -239,7 +244,7 @@ const formatTime = (isoString?: string) => {
                 >
                     <option value="">Todas las Líneas</option>
                     {accounts.map(acc => (
-                        <option key={acc.id} value={acc.id}>{acc.name}</option>
+                        <option key={acc.id} value={acc.id}>{acc.name} ({acc.id.slice(-4)})</option>
                     ))}
                 </select>
                 <ChevronDown className="absolute right-3 top-3 w-3 h-3 text-slate-400 pointer-events-none" />
@@ -272,6 +277,7 @@ const formatTime = (isoString?: string) => {
             </button>
         </div>
 
+        {/* PANEL DE FILTROS AVANZADOS */}
         {showFilters && (
             <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 animate-in slide-in-from-top-2 fade-in duration-200">
                 <div className="flex justify-between items-center mb-1">
@@ -373,6 +379,13 @@ const formatTime = (isoString?: string) => {
                           
                           {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
                           {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
+                          
+                          {/* Línea Origen (Multi-Cuenta) */}
+                          {!selectedAccountId && contact.origin_phone_id && (
+                              <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-mono rounded border border-gray-200">
+                                  #{contact.origin_phone_id.slice(-4)}
+                              </span>
+                          )}
                       </div>
                     </div>
                   </button>
