@@ -2,14 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Send, Smile, Paperclip, MessageSquare, User, Briefcase, CheckCircle, 
   Image as ImageIcon, X, Mic, Square, FileText, Download, Play, Pause, 
-  Volume2, VolumeX, ArrowLeft, UserPlus, ChevronDown, ChevronUp, UserCheck, 
-  Info, Lock, StickyNote, Mail, Phone, MapPin, Calendar, Save, Search, 
-  LayoutTemplate, Tag, Zap, Bot, StopCircle, UploadCloud 
+  Volume2, VolumeX, ArrowLeft, UserPlus, UserCheck, Info, Lock, StickyNote, Mail, 
+  Phone, MapPin, Calendar, Save, Search, LayoutTemplate, Tag, Zap, Bot, 
+  StopCircle, UploadCloud, Clock, AlertTriangle, ChevronUp, ChevronDown 
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
 
-// Definimos la interfaz aquí para evitar dependencias circulares
 interface QuickReply {
     id: string;
     title: string;
@@ -71,8 +70,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   
-  // Datos CRM Locales
+  // IA States
+  const [aiThinking, setAiThinking] = useState(false);
+  const [isAiActive, setIsAiActive] = useState(false);
+  
+  // Drag States
+  const [isDragging, setIsDragging] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File|null>(null);
+  
+  // CRM States
   const [name, setName] = useState(contact.name || '');
   const [department, setDepartment] = useState(contact.department || '');
   const [status, setStatus] = useState(contact.status || '');
@@ -81,44 +89,39 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [crmAddress, setCrmAddress] = useState('');
   const [crmNotes, setCrmNotes] = useState('');
   const [crmSignupDate, setCrmSignupDate] = useState('');
-  
   const [contactTags, setContactTags] = useState<string[]>(contact.tags || []);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-  
   const [showAssignMenu, setShowAssignMenu] = useState(false);
   const [showTagMenu, setShowTagMenu] = useState(false);
-  const [showDetailsPanel, setShowDetailsPanel] = useState(false); 
   const [isInternalMode, setIsInternalMode] = useState(false); 
   const [isSaving, setIsSaving] = useState(false);
-  
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
-
+  
+  // BÚSQUEDA
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
-  
-  // ESTADOS IA
-  const [aiThinking, setAiThinking] = useState(false);
-  const [isAiActive, setIsAiActive] = useState(false); 
-  
-  // ESTADOS DRAG & DROP Y ARCHIVOS PENDIENTES
-  const [isDragging, setIsDragging] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
-
   const typingUser = typingInfo[contact.phone] || null;
+  
+  // --- AÑADIDA LA DEFINICIÓN DE isOnline QUE FALTABA ---
   const isOnline = onlineUsers.some(u => {
       if (!u) return false;
       const userLower = u.toLowerCase().trim();
       const contactName = (contact.name || '').toLowerCase().trim();
       const contactPhone = (contact.phone || '').replace(/\D/g, ''); 
+      // Comprobar si el nombre o el teléfono del contacto están en la lista de usuarios online
       if (contactName && userLower === contactName) return true;
       if (contactPhone && userLower === contactPhone) return true;
       return false;
   });
+
+  // LÓGICA VENTANA 24H
+  const [is24hWindowOpen, setIs24hWindowOpen] = useState(true);
+  const [windowTimeLeft, setWindowTimeLeft] = useState<string>('');
 
   const lastTypingTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -129,74 +132,39 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com' : 'http://localhost:3000';
 
-  const scrollToBottom = () => {
-      if (!chatSearchQuery) {
-          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }
-  };
+  const scrollToBottom = () => { if (!chatSearchQuery) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => scrollToBottom(), [messages]); 
 
-  // --- USE EFFECTS ---
+  // --- EFECTOS ---
   useEffect(() => {
     setName(contact.name || ''); 
     setDepartment(contact.department || ''); 
-    setStatus(contact.status || '');
-    setAssignedTo(contact.assigned_to || '');
-    setCrmEmail(contact.email || '');
-    setCrmAddress(contact.address || '');
-    setCrmNotes(contact.notes || '');
-    setCrmSignupDate(contact.signup_date || '');
+    setStatus(contact.status || ''); 
+    setAssignedTo(contact.assigned_to || ''); 
+    setCrmEmail(contact.email || ''); 
+    setCrmAddress(contact.address || ''); 
+    setCrmNotes(contact.notes || ''); 
+    setCrmSignupDate(contact.signup_date || ''); 
     setContactTags(contact.tags || []);
     
-    setMessages([]); 
-    setShowEmojiPicker(false); 
-    setIsRecording(false);
-    setShowAssignMenu(false); 
-    setShowTagMenu(false); 
-    setShowDetailsPanel(false); 
-    setIsInternalMode(false);
-    setShowQuickRepliesList(false);
+    setMessages([]); setShowEmojiPicker(false); setIsRecording(false); setShowAssignMenu(false); setShowTagMenu(false); setShowDetailsPanel(false); setIsInternalMode(false); setShowQuickRepliesList(false); setAiThinking(false); setIsAiActive(false); setIsDragging(false); setPendingFile(null); 
     
-    // Reset estados
-    setAiThinking(false);
-    setIsAiActive(false);
-    setIsDragging(false);
-    setPendingFile(null); // Limpiar archivo pendiente al cambiar de chat
-
-    setShowSearch(false);
-    setChatSearchQuery('');
-    setSearchMatches([]);
-    setCurrentMatchIdx(0);
+    setShowSearch(false); setChatSearchQuery(''); setSearchMatches([]); setCurrentMatchIdx(0);
     
     if (socket && contact.phone) socket.emit('request_conversation', contact.phone);
   }, [contact.id, socket]); 
 
-  // --- LISTENERS DE IA ---
+  // Listeners de IA y Mensajes
   useEffect(() => {
-      if (!socket) return;
-      
-      const handleAiStatus = (data: { phone: string, status: string }) => {
-          if (data.phone === contact.phone) {
-              setAiThinking(data.status === 'thinking');
-              if (data.status === 'thinking') scrollToBottom();
-          }
-      };
-
-      const handleAiActive = (data: { phone: string, active: boolean }) => {
-          if (data.phone === contact.phone) {
-              setIsAiActive(data.active);
-          }
-      };
-
-      socket.on('ai_status', handleAiStatus);
-      socket.on('ai_active_change', handleAiActive);
-      
-      return () => { 
-          socket.off('ai_status', handleAiStatus); 
-          socket.off('ai_active_change', handleAiActive);
-      };
+     if (!socket) return;
+     const handleAi = (d: any) => { if(d.phone===contact.phone) setAiThinking(d.status==='thinking'); };
+     const handleActive = (d: any) => { if(d.phone===contact.phone) setIsAiActive(d.active); };
+     const handleMsg = (m: any) => { if(m.sender===contact.phone || m.recipient===contact.phone) setMessages(p=>[...p, m]); };
+     socket.on('ai_status', handleAi); socket.on('ai_active_change', handleActive); socket.on('message', handleMsg); socket.on('conversation_history', (h:any) => setMessages(h));
+     return () => { socket.off('ai_status'); socket.off('ai_active_change'); socket.off('message'); socket.off('conversation_history'); };
   }, [socket, contact.phone]);
 
+  // Lógica de Búsqueda
   useEffect(() => {
       if (!chatSearchQuery.trim()) { setSearchMatches([]); setCurrentMatchIdx(0); return; }
       const matches: SearchMatch[] = []; const regex = new RegExp(chatSearchQuery, 'gi');
@@ -204,58 +172,78 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       setSearchMatches(matches); setCurrentMatchIdx(Math.max(0, matches.length - 1));
   }, [chatSearchQuery, messages]);
 
-  useEffect(() => { if (searchMatches.length > 0 && searchMatches[currentMatchIdx]) { const { msgIndex, matchIndex } = searchMatches[currentMatchIdx]; const elementId = `match-${msgIndex}-${matchIndex}`; const el = document.getElementById(elementId); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }, [currentMatchIdx, searchMatches]);
+  useEffect(() => { 
+      if (searchMatches.length > 0 && searchMatches[currentMatchIdx]) { 
+          const { msgIndex, matchIndex } = searchMatches[currentMatchIdx]; 
+          const elementId = `match-${msgIndex}-${matchIndex}`; 
+          const el = document.getElementById(elementId); 
+          if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } 
+      } 
+  }, [currentMatchIdx, searchMatches]);
+
   const handleNextMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev + 1) % searchMatches.length); };
   const handlePrevMatch = () => { if (searchMatches.length === 0) return; setCurrentMatchIdx((prev) => (prev - 1 + searchMatches.length) % searchMatches.length); };
 
-  useEffect(() => { if (contact.name) setName(contact.name); if (contact.department) setDepartment(contact.department); if (contact.status) setStatus(contact.status); if (contact.assigned_to) setAssignedTo(contact.assigned_to); if (contact.signup_date) setCrmSignupDate(contact.signup_date); if (contact.tags) setContactTags(contact.tags); }, [contact]); 
-  useEffect(() => { if (socket) { socket.emit('request_agents'); const handleAgentsList = (list: Agent[]) => setAgents(list); socket.on('agents_list', handleAgentsList); return () => { socket.off('agents_list', handleAgentsList); }; } }, [socket]);
-  useEffect(() => { const handleHistory = (history: Message[]) => setMessages(history); const handleNewMessage = (msg: any) => { if (msg.sender === contact.phone || msg.sender === 'Agente' || msg.sender === 'Bot IA' || msg.recipient === contact.phone) { setMessages((prev) => [...prev, msg]); } }; if (socket) { socket.on('conversation_history', handleHistory); socket.on('message', handleNewMessage); return () => { socket.off('conversation_history', handleHistory); socket.off('message', handleNewMessage); }; } }, [socket, contact.phone]);
+  // Cálculo Ventana 24h
+  useEffect(() => {
+    const checkWindow = () => {
+        const lastCustomerMsg = [...messages].reverse().find(m => m.sender === contact.phone);
+        if (!lastCustomerMsg) {
+            setIs24hWindowOpen(false); 
+            setWindowTimeLeft("Sin historial reciente");
+            return;
+        }
+        const lastMsgTime = new Date(lastCustomerMsg.timestamp).getTime();
+        const now = Date.now();
+        const diff = now - lastMsgTime;
+        const limit = 24 * 60 * 60 * 1000; 
+
+        if (diff < limit) {
+            setIs24hWindowOpen(true);
+            const remaining = limit - diff;
+            const hours = Math.floor(remaining / (1000 * 60 * 60));
+            const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+            setWindowTimeLeft(`${hours}h ${minutes}m`);
+        } else {
+            setIs24hWindowOpen(false);
+            setWindowTimeLeft("Expirada");
+        }
+    };
+    checkWindow();
+    const interval = setInterval(checkWindow, 60000);
+    return () => clearInterval(interval);
+  }, [messages, contact.phone]);
+
+  // Carga de Agentes
+  useEffect(() => { 
+      if (socket) { 
+          socket.emit('request_agents'); 
+          const handleAgentsList = (list: Agent[]) => setAgents(list); 
+          socket.on('agents_list', handleAgentsList); 
+          return () => { socket.off('agents_list', handleAgentsList); }; 
+      } 
+  }, [socket]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { setInput(e.target.value); const now = Date.now(); if (socket && (now - lastTypingTimeRef.current > 2000)) { socket.emit('typing', { user: user.username, phone: contact.phone }); lastTypingTimeRef.current = now; } };
   
-  // --- FUNCIÓN DE ENVÍO UNIFICADA (ARCHIVO Y TEXTO) ---
   const sendMessage = async (e: React.FormEvent) => { 
     e.preventDefault(); 
-    
-    // 1. Si hay archivo pendiente, lo subimos
-    if (pendingFile) {
-        await uploadFile(pendingFile);
-        setPendingFile(null); // Limpiar después de enviar
+    if (!is24hWindowOpen && !isInternalMode) {
+        alert("⚠️ La ventana de 24h ha expirado. Debes usar una PLANTILLA para hablar con este cliente.");
+        return;
     }
-
-    // 2. Si hay texto, lo enviamos
+    if (pendingFile) { await uploadFile(pendingFile); setPendingFile(null); }
     const finalInput = matchingQR ? matchingQR.content : input;
     if (finalInput.trim()) { 
-        const msg = { 
-            text: finalInput, 
-            sender: user.username, 
-            targetPhone: contact.phone, 
-            timestamp: new Date().toISOString(), 
-            type: isInternalMode ? 'note' : 'text',
-            originPhoneId: currentAccountId // <--- ENVÍO DEL ID DE ORIGEN
-        }; 
+        const msg = { text: finalInput, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text', originPhoneId: currentAccountId }; 
         socket.emit('chatMessage', msg); 
         setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); 
-        
         if (isAiActive) handleStopAI();
     } 
   };
 
-  const handleTriggerAI = () => {
-    if (isAiActive) {
-        handleStopAI();
-    } else {
-        if (window.confirm("¿Quieres que la IA responda automáticamente a este cliente?")) {
-            socket.emit('trigger_ai_manual', { phone: contact.phone });
-        }
-    }
-  };
-
-  const handleStopAI = () => {
-      socket.emit('stop_ai_manual', { phone: contact.phone });
-      setIsAiActive(false);
-  };
+  const handleTriggerAI = () => { if (isAiActive) { handleStopAI(); } else { if (window.confirm("¿Activar IA?")) socket.emit('trigger_ai_manual', { phone: contact.phone }); } };
+  const handleStopAI = () => { socket.emit('stop_ai_manual', { phone: contact.phone }); setIsAiActive(false); };
   
   const updateCRM = (field: string, value: any) => { if (socket) { const updates: any = {}; updates[field] = value; if (field === 'assigned_to' && value && status === 'Nuevo') { updates.status = 'Abierto'; setStatus('Abierto'); } socket.emit('update_contact_info', { phone: contact.phone, updates: updates }); } };
   const toggleTag = (tag: string) => { let newTags = [...contactTags]; if (newTags.includes(tag)) { newTags = newTags.filter(t => t !== tag); } else { newTags.push(tag); } setContactTags(newTags); updateCRM('tags', newTags); };
@@ -263,82 +251,34 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
   
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setPendingFile(e.target.files[0]); };
-  
-  const uploadFile = async (file: File) => { 
-      setIsUploading(true); 
-      const formData = new FormData(); 
-      formData.append('file', file); 
-      formData.append('targetPhone', contact.phone); 
-      formData.append('senderName', user.username); 
-      formData.append('originPhoneId', currentAccountId || ''); // ENVÍO DE ORIGEN EN ARCHIVOS
-      try { 
-          await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); 
-      } catch (e) { alert("Error envío"); } 
-      finally { 
-          setIsUploading(false); 
-          if(fileInputRef.current) fileInputRef.current.value = ''; 
-          if (isAiActive) handleStopAI();
-      } 
-  };
+  const uploadFile = async (file: File) => { setIsUploading(true); const formData = new FormData(); formData.append('file', file); formData.append('targetPhone', contact.phone); formData.append('senderName', user.username); formData.append('originPhoneId', currentAccountId || ''); try { await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); } catch (e) { alert("Error envío"); } finally { setIsUploading(false); if(fileInputRef.current) fileInputRef.current.value = ''; if (isAiActive) handleStopAI(); } };
   
   const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); let mimeType = 'audio/webm'; if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'; const mediaRecorder = new MediaRecorder(stream, { mimeType }); mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = []; mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunksRef.current, { type: mimeType }); const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'; const audioFile = new File([audioBlob], `voice.${ext}`, { type: mimeType }); await uploadFile(audioFile); stream.getTracks().forEach(t => t.stop()); }; mediaRecorder.start(); setIsRecording(true); } catch (e:any) { alert(`Error micro: ${e.message}`); } };
   const stopRecording = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
+  
   const onEmojiClick = (emojiData: EmojiClickData) => setInput((prev) => prev + emojiData.emoji);
   const safeTime = (time: string) => { try { return new Date(time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ''; } };
   const getDateLabel = (dateString: string) => { const date = new Date(dateString); if (isNaN(date.getTime())) return ""; const today = new Date(); const yesterday = new Date(); yesterday.setDate(today.getDate() - 1); if (date.toDateString() === today.toDateString()) return "Hoy"; if (date.toDateString() === yesterday.toDateString()) return "Ayer"; return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }); };
-
   const insertQuickReply = (content: string) => { setInput(prev => prev + (prev ? ' ' : '') + content); setShowQuickRepliesList(false); };
-
-  // --- LOGICA DRAG & DROP ---
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.currentTarget === e.target) {
-      setIsDragging(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      if (file.size > 25 * 1024 * 1024) { alert("Archivo demasiado grande (Max 25MB)"); return; }
-      setPendingFile(file); // SOLO GUARDAMOS, NO ENVIAMOS
-    }
-  };
-
+  
+  // Drag & Drop Handlers
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); if (e.currentTarget === e.target) setIsDragging(false); };
+  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const files = e.dataTransfer.files; if (files && files.length > 0) { const file = files[0]; if (file.size > 25 * 1024 * 1024) { alert("Archivo demasiado grande (Max 25MB)"); return; } setPendingFile(file); } };
+  
+  // Render Helpers
   const renderedItems: JSX.Element[] = [];
   let lastDateLabel = "";
-
   for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
       const dateLabel = getDateLabel(m.timestamp);
-      
-      if (dateLabel && dateLabel !== lastDateLabel) {
-          renderedItems.push(<div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6"><span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-sm border border-slate-300/50">{dateLabel}</span></div>);
-          lastDateLabel = dateLabel;
-      }
-
-      const isMe = m.sender !== contact.phone;
-      const isNote = m.type === 'note';
-      const isTemplate = m.type === 'template';
-      const isBot = m.sender === 'Bot IA';
-
+      if (dateLabel && dateLabel !== lastDateLabel) { renderedItems.push(<div key={`date-${dateLabel}-${i}`} className="flex justify-center my-6"><span className="bg-slate-200/80 backdrop-blur-sm text-slate-600 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-sm border border-slate-300/50">{dateLabel}</span></div>); lastDateLabel = dateLabel; }
+      const isMe = m.sender !== contact.phone; const isNote = m.type === 'note'; const isTemplate = m.type === 'template'; const isBot = m.sender === 'Bot IA';
       let messageContent: React.ReactNode = String(m.text || "");
       
+      // Lógica de resaltado de búsqueda
       if (chatSearchQuery && m.text && typeof m.text === 'string') {
-          let localMatchCounter = 0;
-          const regex = new RegExp(`(${chatSearchQuery})`, 'gi');
-          const parts = m.text.split(regex);
+          let localMatchCounter = 0; const regex = new RegExp(`(${chatSearchQuery})`, 'gi'); const parts = m.text.split(regex);
           messageContent = (<>{parts.map((part, idx) => { if (part.toLowerCase() === chatSearchQuery.toLowerCase()) { const isCurrentMatch = searchMatches[currentMatchIdx]?.msgIndex === i && searchMatches[currentMatchIdx]?.matchIndex === localMatchCounter; const elementId = `match-${i}-${localMatchCounter}`; localMatchCounter++; return (<span key={idx} id={elementId} className={`font-bold rounded px-0.5 transition-colors duration-300 ${isCurrentMatch ? 'bg-orange-400 text-white ring-2 ring-orange-400' : 'bg-yellow-300 text-slate-900'}`}>{part}</span>); } return <span key={idx}>{part}</span>; })}</>);
       }
 
@@ -346,7 +286,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
         <div key={i} className={`flex ${isMe || isBot ? 'justify-end' : 'justify-start'}`}>
           <div className={`flex flex-col max-w-[90%] md:max-w-[75%]`}>
             {isMe && <span className="text-[10px] text-slate-500 font-bold mb-1 block text-right mr-1 uppercase tracking-wide">{m.sender === 'Agente' ? 'Yo' : m.sender}</span>}
-            
             <div className={`p-3 rounded-xl shadow-sm text-sm relative ${isNote ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : (isMe || isBot) ? 'bg-[#e0f2fe] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none border border-slate-100'} ${isTemplate ? 'border-l-4 border-l-green-500 bg-green-50' : ''} ${isBot ? 'border-2 border-purple-200 bg-purple-50' : ''}`}>
                 {isNote && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-yellow-600"><Lock className="w-3 h-3" /> Nota Interna</div>}
                 {isTemplate && <div className="flex items-center gap-1 mb-1 text-[10px] font-bold uppercase text-green-700"><LayoutTemplate className="w-3 h-3" /> Plantilla WhatsApp</div>}
@@ -369,8 +308,11 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       {selectedImage && <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}><button className="absolute top-4 right-4 text-white/70 hover:text-white p-2" onClick={() => setSelectedImage(null)}><X className="w-6 h-6" /></button><img src={selectedImage} alt="Grande" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} /></div>}
 
       <div className="flex flex-col flex-1 min-w-0 h-full border-r border-gray-200">
+          
+          {/* HEADER CHAT */}
           <div className="bg-white border-b border-gray-200 p-3 flex flex-wrap gap-3 items-center shadow-sm z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
             {onBack && <button onClick={onBack} className="md:hidden p-2 rounded-full text-slate-500 hover:bg-slate-100"><ArrowLeft className="w-5 h-5" /></button>}
+            
             <div className="flex flex-col w-full md:w-auto md:min-w-[200px] md:max-w-[300px]">
                 <div className="flex items-center gap-2 bg-slate-50 px-2 rounded-md border border-slate-200">
                     <User className="w-4 h-4 text-slate-400" />
@@ -380,7 +322,8 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     {typingUser ? <span className="text-[11px] text-green-600 font-bold flex items-center gap-1.5 bg-green-50 px-2 py-0.5 rounded-full w-fit"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>{typingUser} está escribiendo...</span> : isOnline ? <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5 px-1 w-fit"><span className="relative flex h-2 w-2"><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span>En línea</span> : null}
                 </div>
             </div>
-            {/* Header Controls */}
+            
+            {/* CONTROLES CRM (ASIGNAR, DPTO, ESTADO, TAGS) */}
             {status === 'Nuevo' ? (
                 <div className="relative">
                     <button onClick={(e) => { e.stopPropagation(); setShowAssignMenu(!showAssignMenu); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700 transition shadow-sm animate-pulse"><UserPlus className="w-3.5 h-3.5" /> Asignar</button>
@@ -397,16 +340,25 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     </div>
                 </>
             )}
+            
             <div className="flex-1"></div>
+            
+            {/* BARRA DE BÚSQUEDA EN CHAT */}
             <div className="relative">
                 {showSearch ? (
                     <div className="flex items-center bg-slate-100 rounded-lg px-2 py-1 animate-in fade-in slide-in-from-right-5 absolute right-0 top-0 md:static z-20 shadow-md md:shadow-none min-w-[280px]">
                         <Search className="w-4 h-4 text-slate-400 mr-2" />
                         <input autoFocus className="bg-transparent border-none outline-none text-xs w-full text-slate-700" placeholder="Buscar..." value={chatSearchQuery} onChange={(e) => setChatSearchQuery(e.target.value)} onClick={(e) => e.stopPropagation()} />
-                        <div className="flex items-center border-l border-slate-300 pl-2 ml-2 gap-1"><span className="text-[10px] text-slate-400 mr-1">{searchMatches.length > 0 ? `${currentMatchIdx + 1}/${searchMatches.length}` : '0/0'}</span><button onClick={(e) => { e.stopPropagation(); handlePrevMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronUp className="w-3 h-3"/></button><button onClick={(e) => { e.stopPropagation(); handleNextMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronDown className="w-3 h-3"/></button></div><button onClick={(e) => { e.stopPropagation(); setShowSearch(false); setChatSearchQuery(''); }} className="ml-2 p-1 hover:bg-slate-200 rounded-full"><X className="w-3 h-3 text-slate-500"/></button>
+                        <div className="flex items-center border-l border-slate-300 pl-2 ml-2 gap-1">
+                            <span className="text-[10px] text-slate-400 mr-1">{searchMatches.length > 0 ? `${currentMatchIdx + 1}/${searchMatches.length}` : '0/0'}</span>
+                            <button onClick={(e) => { e.stopPropagation(); handlePrevMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronUp className="w-3 h-3"/></button>
+                            <button onClick={(e) => { e.stopPropagation(); handleNextMatch(); }} className="p-1 hover:bg-slate-200 rounded text-slate-500" disabled={searchMatches.length === 0}><ChevronDown className="w-3 h-3"/></button>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); setShowSearch(false); setChatSearchQuery(''); }} className="ml-2 p-1 hover:bg-slate-200 rounded-full"><X className="w-3 h-3 text-slate-500"/></button>
                     </div>
                 ) : ( <button onClick={(e) => { e.stopPropagation(); setShowSearch(true); }} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-500 transition" title="Buscar en conversación"><Search className="w-5 h-5"/></button> )}
             </div>
+            
             <button onClick={() => setShowDetailsPanel(!showDetailsPanel)} className={`p-2 rounded-lg transition ${showDetailsPanel ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:bg-slate-100'}`} title="Info Cliente"><Info className="w-5 h-5"/></button>
           </div>
 
@@ -426,6 +378,17 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                 </div>
             )}
 
+            {/* AVISO VENTANA 24H CERRADA */}
+            {!is24hWindowOpen && !isInternalMode && (
+                <div className="sticky top-0 z-30 mb-4 flex justify-center">
+                    <div className="bg-orange-100 border border-orange-200 text-orange-800 px-4 py-2 rounded-xl text-xs font-bold shadow-sm flex items-center gap-2 animate-in slide-in-from-top-5">
+                        <Clock size={16} />
+                        <span>Ventana de 24h cerrada. Envía una plantilla.</span>
+                        <button onClick={onOpenTemplates} className="ml-2 bg-orange-600 text-white px-2 py-1 rounded-md hover:bg-orange-700 transition">Usar Plantilla</button>
+                    </div>
+                </div>
+            )}
+
             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><MessageSquare className="w-12 h-12 mb-2" /><p className="text-sm">Historial cargado.</p></div>}
             {renderedItems}
             {aiThinking && (
@@ -439,43 +402,24 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
             <div ref={messagesEndRef} />
           </div>
           
-          {/* ... (Resto del Footer con Inputs) ... */}
-          {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
-          
+          {/* INPUT AREA */}
           <div className={`p-3 border-t relative z-20 transition-colors duration-300 ${isInternalMode ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-slate-200'} ${isAiActive ? 'border-t-4 border-purple-500 bg-purple-50' : ''}`}>
             
-            {/* PANEL DE PREVISUALIZACIÓN DE ATAJO */}
+            {/* ALERTAS Y ESTADOS (ABSOLUTE BOTTOM) */}
             {matchingQR && (
                 <div className="absolute bottom-full left-0 w-full bg-yellow-50 border-t border-yellow-200 p-2 text-xs text-yellow-800 flex items-center gap-2 animate-in slide-in-from-bottom-2 z-10">
                     <Zap className="w-4 h-4 fill-current" />
-                    <span className="font-bold">Atajo detectado:</span>
-                    <span className="truncate flex-1 italic font-medium">{matchingQR.content}</span>
-                    <span className="text-[10px] opacity-70 whitespace-nowrap">(Se enviará este texto)</span>
+                    <span className="font-bold">Atajo:</span> <span className="truncate flex-1 italic font-medium">{matchingQR.content}</span>
                 </div>
             )}
             
-            {/* PANEL DE PREVISUALIZACIÓN DE ARCHIVO (NUEVO) */}
             {pendingFile && (
                 <div className="absolute bottom-full left-0 w-full bg-slate-100 border-t border-slate-200 p-3 flex items-center justify-between z-20 animate-in slide-in-from-bottom-2 shadow-sm">
                     <div className="flex items-center gap-3 overflow-hidden">
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 text-blue-500">
-                            {pendingFile.type.startsWith('image') ? <ImageIcon size={20}/> : <FileText size={20}/>}
-                        </div>
-                        <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-700 truncate">{pendingFile.name}</p>
-                            <p className="text-[10px] text-slate-400">{(pendingFile.size / 1024 / 1024).toFixed(2)} MB • Listo para enviar</p>
-                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 text-blue-500">{pendingFile.type.startsWith('image') ? <ImageIcon size={20}/> : <FileText size={20}/>}</div>
+                        <div className="min-w-0"><p className="text-xs font-bold text-slate-700 truncate">{pendingFile.name}</p></div>
                     </div>
-                    <button 
-                        onClick={() => { 
-                            setPendingFile(null); 
-                            if(fileInputRef.current) fileInputRef.current.value=''; 
-                        }} 
-                        className="p-1.5 hover:bg-slate-200 rounded-full text-slate-500 transition"
-                        title="Cancelar subida"
-                    >
-                        <X size={16}/>
-                    </button>
+                    <button onClick={() => { setPendingFile(null); if(fileInputRef.current) fileInputRef.current.value=''; }} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-500 transition"><X size={16}/></button>
                 </div>
             )}
 
@@ -485,59 +429,48 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
                     <button onClick={handleStopAI} className="bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-[10px] flex items-center gap-1 transition"><StopCircle className="w-3 h-3"/> DETENER IA</button>
                  </div>
             )}
+            
+            {/* EMOJI PICKER */}
+            {showEmojiPicker && <div className="absolute bottom-20 left-4 z-50 shadow-2xl rounded-xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}><EmojiPicker onEmojiClick={onEmojiClick} width={300} height={400} previewConfig={{ showPreview: false }} /></div>}
 
+            {/* BARRA DE ESCRITURA */}
             <form onSubmit={sendMessage} className="flex gap-2 items-center max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-              <button 
-                type="button" 
-                onClick={() => fileInputRef.current?.click()} 
-                disabled={isUploading} 
-                className={`p-2 rounded-full transition ${pendingFile ? 'text-blue-600 bg-blue-100' : 'text-slate-500 hover:bg-slate-200'}`} 
-                title="Adjuntar"
-              >
-                <Paperclip className="w-5 h-5" />
-              </button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading || (!is24hWindowOpen && !isInternalMode)} className={`p-2 rounded-full transition ${pendingFile ? 'text-blue-600 bg-blue-100' : 'text-slate-500 hover:bg-slate-200'} disabled:opacity-30`} title="Adjuntar"><Paperclip className="w-5 h-5" /></button>
               
               <button type="button" onClick={onOpenTemplates} className="p-2 rounded-full text-slate-500 hover:text-green-600 hover:bg-green-50 transition" title="Usar Plantilla"><LayoutTemplate className="w-5 h-5" /></button>
 
               <div className="relative">
-                  <button type="button" onClick={() => setShowQuickRepliesList(!showQuickRepliesList)} className="p-2 rounded-full text-slate-500 hover:text-yellow-600 hover:bg-yellow-50 transition" title="Respuestas Rápidas"><Zap className="w-5 h-5" /></button>
+                  <button type="button" onClick={() => setShowQuickRepliesList(!showQuickRepliesList)} className="p-2 rounded-full text-slate-500 hover:text-yellow-600 hover:bg-yellow-50 transition" title="Respuestas Rápidas" disabled={!is24hWindowOpen && !isInternalMode}><Zap className="w-5 h-5" /></button>
                   {showQuickRepliesList && (
                       <div className="absolute bottom-full left-0 mb-2 w-64 bg-white rounded-xl shadow-xl border border-slate-100 z-50 p-2 animate-in slide-in-from-bottom-2 fade-in">
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 px-2">Respuestas Rápidas</p>
                           <div className="max-h-60 overflow-y-auto space-y-1">
-                              {quickReplies && quickReplies.length > 0 ? quickReplies.map(qr => (
-                                  <button key={qr.id} onClick={() => insertQuickReply(qr.content)} className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-50 transition-colors group">
-                                      <div className="font-bold text-slate-700">{qr.title}</div>
-                                      <div className="text-[10px] text-slate-500 truncate group-hover:text-slate-600">{qr.content}</div>
-                                      {qr.shortcut && <div className="text-[9px] text-yellow-600 font-mono mt-0.5">{qr.shortcut}</div>}
-                                  </button>
-                              )) : <div className="text-xs text-slate-400 italic px-2">No hay respuestas configuradas.</div>}
+                              {quickReplies && quickReplies.length > 0 ? quickReplies.map(qr => (<button key={qr.id} onClick={() => insertQuickReply(qr.content)} className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-50 transition-colors group"><div className="font-bold text-slate-700">{qr.title}</div><div className="text-[10px] text-slate-500 truncate group-hover:text-slate-600">{qr.content}</div>{qr.shortcut && <div className="text-[9px] text-yellow-600 font-mono mt-0.5">{qr.shortcut}</div>}</button>)) : <div className="text-xs text-slate-400 italic px-2">No hay respuestas.</div>}
                           </div>
                       </div>
                   )}
               </div>
 
-              <button type="button" onClick={handleTriggerAI} className={`p-2 rounded-full transition-all ${isAiActive ? 'bg-purple-600 text-white animate-pulse shadow-lg shadow-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`} title={isAiActive ? "Detener IA" : "Delegar a IA"}>{isAiActive ? <StopCircle className="w-5 h-5" /> : <Bot className="w-5 h-5" />}</button>
+              <button type="button" onClick={handleTriggerAI} className={`p-2 rounded-full transition-all ${isAiActive ? 'bg-purple-600 text-white animate-pulse shadow-lg shadow-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`} title="IA"><Bot className="w-5 h-5" /></button>
 
-              <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title={isInternalMode ? "Modo Nota Interna (Privado)" : "Cambiar a Nota Interna"}>{isInternalMode ? <Lock className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}</button>
+              <button type="button" onClick={() => setIsInternalMode(!isInternalMode)} className={`p-2 rounded-full transition-all ${isInternalMode ? 'text-yellow-600 bg-yellow-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`} title="Nota Interna"><Lock className="w-5 h-5" /></button>
 
               <input 
                 type="text" 
                 value={input} 
                 onChange={handleInputChange} 
-                placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : (isInternalMode ? "Escribe una nota interna (solo equipo)..." : (pendingFile ? "Añadir comentario (opcional)..." : "Mensaje"))} 
-                disabled={isUploading || isRecording} 
-                className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none focus:border-blue-300 text-sm transition-colors ${isInternalMode ? 'bg-yellow-100 border-yellow-300 placeholder-yellow-600/50 text-yellow-900' : 'bg-slate-50 border-slate-200'}`} 
+                placeholder={isUploading ? "Enviando..." : isRecording ? "Grabando..." : (isInternalMode ? "Nota interna (privada)..." : (!is24hWindowOpen ? "Ventana cerrada. Usa una plantilla." : "Mensaje"))} 
+                disabled={isUploading || isRecording || (!is24hWindowOpen && !isInternalMode)} 
+                className={`flex-1 py-3 px-4 rounded-lg border focus:outline-none focus:border-blue-300 text-sm transition-colors ${isInternalMode ? 'bg-yellow-100 border-yellow-300 placeholder-yellow-600/50 text-yellow-900' : (!is24hWindowOpen ? 'bg-gray-100 cursor-not-allowed text-gray-400' : 'bg-slate-50 border-slate-200')}`} 
               />
               
-              <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}><Smile className="w-5 h-5" /></button>
+              <button type="button" className={`p-2 rounded-full transition ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-500 hover:bg-slate-200'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={!is24hWindowOpen && !isInternalMode}><Smile className="w-5 h-5" /></button>
               
-              {/* BOTÓN ENVIAR INTELIGENTE */}
               {(input.trim() || pendingFile) ? (
                 <button type="submit" disabled={isUploading} className={`p-3 text-white rounded-full hover:shadow-md transition shadow-sm ${isInternalMode ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'}`}><Send className="w-5 h-5" /></button>
               ) : (
-                <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'}`} title="Grabar"><Mic className="w-5 h-5" /></button>
+                <button type="button" onClick={isRecording ? stopRecording : startRecording} className={`p-3 rounded-full text-white transition shadow-sm ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700'} ${(!is24hWindowOpen && !isInternalMode) ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!is24hWindowOpen && !isInternalMode}><Mic className="w-5 h-5" /></button>
               )}
             </form>
           </div>
