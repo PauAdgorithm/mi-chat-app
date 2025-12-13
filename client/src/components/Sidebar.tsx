@@ -15,6 +15,7 @@ import {
   Smartphone 
 } from 'lucide-react';
 
+// --- INTERFACES (Exportadas para que App.tsx las use) ---
 export interface Contact {
   id: string;
   phone: string;
@@ -30,14 +31,14 @@ export interface Contact {
   notes?: string;
   signup_date?: string; 
   tags?: string[];
-  origin_phone_id?: string;
+  origin_phone_id?: string; // Campo crítico para Multi-Cuenta
 }
 
 interface Agent { id: string; name: string; }
 interface ConfigItem { id: string; name: string; type: string; }
 
 interface SidebarProps {
-  user: { username: string, role: string };
+  user: { username: string, role: string; preferences?: any };
   socket: any;
   onSelectContact: (contact: Contact) => void;
   selectedContactId?: string;
@@ -53,23 +54,46 @@ interface SidebarProps {
 
 type ViewScope = 'all' | 'mine' | 'unassigned';
 
+// --- HELPERS ---
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
 };
 
+const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return '';
+        const today = new Date();
+        if (date.toDateString() === today.toDateString()) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+    } catch { return ''; }
+};
+
+const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
+
+const cleanMessagePreview = (msg: any) => {
+    if (!msg) return "Haz clic para ver";
+    if (typeof msg === 'string') return msg.includes('[object Object]') ? "Mensaje" : msg;
+    if (typeof msg === 'object') return "Mensaje";
+    return String(msg);
+};
+
 export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView, selectedAccountId, onSelectAccount }: SidebarProps) {
   
-  // --- URL DE LA API (FIX 404) ---
+  // --- URL API (Para evitar el error 404 al pedir cuentas) ---
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
 
-  // 1. ESTADOS
+  // --- ESTADOS ---
   const [viewScope, setViewScope] = useState<ViewScope>('all'); 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); 
+  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); // Lista de números
   
   const [activeFilters, setActiveFilters] = useState({
       department: '',
@@ -78,6 +102,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       agent: ''
   });
   
+  // Listas para los desplegables de filtros
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
   const [availableDepts, setAvailableDepts] = useState<string[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
@@ -86,14 +111,14 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 2. CARGA INICIAL
+  // --- EFECTO 1: CARGA INICIAL ---
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
         socket.emit('request_agents'); 
         socket.emit('request_config'); 
         
-        // FIX: Usar URL absoluta para evitar 404
+        // Cargar cuentas disponibles para el selector
         fetch(`${API_URL}/accounts`)
             .then(r => {
                 if (!r.ok) throw new Error("Error cargando cuentas");
@@ -104,7 +129,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     }
   }, [socket, isConnected]);
 
-  // Limpiar unread al seleccionar
+  // --- EFECTO 2: LIMPIAR NO LEÍDOS AL ENTRAR EN CHAT ---
   useEffect(() => {
       if (selectedContactId) {
           const contact = contacts.find(c => c.id === selectedContactId);
@@ -119,7 +144,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       }
   }, [selectedContactId, contacts]);
 
-  // 3. LISTENERS DEL SOCKET
+  // --- EFECTO 3: LISTENERS DEL SOCKET (EL NÚCLEO) ---
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
     if (Notification.permission !== 'granted') Notification.requestPermission();
@@ -143,10 +168,32 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     socket.on('config_list', handleConfigList);     
     socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
 
+    // Lógica de Notificaciones Inteligente
     const handleNewMessageNotification = (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
         if (!isMe) {
-            audioRef.current?.play().catch(() => {});
+            // Filtrado de notificaciones por preferencias de usuario
+            let shouldNotify = true;
+            const prefs = user.preferences || {};
+
+            if (prefs.departments && prefs.departments.length > 0) {
+                 const contact = contacts.find(c => normalizePhone(c.phone) === normalizePhone(msg.sender));
+                 if (contact && contact.department && !prefs.departments.includes(contact.department)) {
+                     shouldNotify = false; 
+                 }
+            }
+            
+            if (prefs.phoneIds && prefs.phoneIds.length > 0) {
+                if (msg.origin_phone_id && !prefs.phoneIds.includes(msg.origin_phone_id)) {
+                    shouldNotify = false;
+                }
+            }
+
+            if (shouldNotify) {
+                audioRef.current?.play().catch(() => {});
+            }
+
+            // Incrementar contador de no leídos
             const senderClean = normalizePhone(msg.sender);
             const currentContact = contacts.find(c => c.id === selectedContactId);
             const currentContactPhoneClean = currentContact ? normalizePhone(currentContact.phone) : null;
@@ -160,6 +207,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
     socket.on('message', handleNewMessageNotification);
 
+    // Polling de seguridad
     const interval = setInterval(() => {
         if(isConnected) socket.emit('request_contacts');
     }, 10000);
@@ -172,46 +220,28 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       socket.off('message', handleNewMessageNotification);
       clearInterval(interval);
     };
-  }, [socket, user.username, isConnected, selectedContactId, contacts]);
+  }, [socket, user.username, isConnected, selectedContactId, contacts, user.preferences]); // Añadido user.preferences a dependencias
 
-  // 4. HELPERS
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '';
-    try {
-        const date = new Date(isoString);
-        if (isNaN(date.getTime())) return '';
-        
-        const today = new Date();
-        if (date.toDateString() === today.toDateString()) {
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
-        return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-    } catch { return ''; }
-  };
-
-  const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
-
-  const cleanMessagePreview = (msg: any) => {
-    if (!msg) return "Haz clic para ver";
-    if (typeof msg === 'string') return msg.includes('[object Object]') ? "Mensaje" : msg;
-    if (typeof msg === 'object') return "Mensaje";
-    return String(msg);
-  };
-
-  // 5. LÓGICA DE FILTRADO
+  // --- LÓGICA DE FILTRADO ---
   const filteredContacts = contacts.filter(c => {
-      // Filtro Multi-Cuenta
-      if (selectedAccountId && c.origin_phone_id !== selectedAccountId) return false;
+      // 1. Filtro Multi-Cuenta (Si hay una cuenta seleccionada)
+      if (selectedAccountId) {
+          // Si el contacto tiene origen y no coincide, fuera.
+          // Si el contacto NO tiene origen (es antiguo/huérfano), LO MOSTRAMOS SIEMPRE para no perderlo.
+          if (c.origin_phone_id && c.origin_phone_id !== selectedAccountId) {
+              return false;
+          }
+      }
 
-      // Filtro Búsqueda
+      // 2. Filtro Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
-      // Filtro Vistas
+      // 3. Filtro Vistas (Tabs)
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
-      // Filtros Avanzados
+      // 4. Filtros Avanzados
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
@@ -226,6 +256,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
+  // --- RENDER ---
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
@@ -242,7 +273,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                     onChange={(e) => onSelectAccount(e.target.value || null)}
                     className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
                 >
-                    <option value="">Todas las Líneas</option>
+                    <option value="">Todas las Líneas (Global)</option>
                     {accounts.map(acc => (
                         <option key={acc.id} value={acc.id}>{acc.name} ({acc.id.slice(-4)})</option>
                     ))}
@@ -377,13 +408,10 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                           ))}
                           {contact.tags && contact.tags.length > 2 && <span className="text-[9px] text-slate-400">+{contact.tags.length - 2}</span>}
                           
-                          {contact.department && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[9px] font-bold rounded-md border border-purple-100 uppercase tracking-wide flex items-center gap-1">{String(contact.department)}</span>}
-                          {contact.assigned_to && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-medium rounded border border-slate-200 flex items-center gap-1"><UserCheck className="w-3 h-3" /> {contact.assigned_to}</span>}
-                          
-                          {/* Línea Origen (Multi-Cuenta) */}
+                          {/* Badge de Origen (Multi-Cuenta) - Visible si seleccionas 'Todas' */}
                           {!selectedAccountId && contact.origin_phone_id && (
                               <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-mono rounded border border-gray-200">
-                                  #{contact.origin_phone_id.slice(-4)}
+                                  Línea {contact.origin_phone_id.slice(-4)}
                               </span>
                           )}
                       </div>
