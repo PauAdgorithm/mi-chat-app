@@ -90,6 +90,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [newContactPhone, setNewContactPhone] = useState('');
   const [newContactName, setNewContactName] = useState('');
   const [newContactEmail, setNewContactEmail] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
   
   // Importación
   const [importFile, setImportFile] = useState<File|null>(null);
@@ -183,18 +184,22 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const handleCreateContact = async (e: React.FormEvent) => {
       e.preventDefault();
       
-      // Validación previa de formato
-      if (!/^\d{10,15}$/.test(newContactPhone)) {
-          alert("El número debe tener entre 10 y 15 dígitos y contener el código de país (ej: 34600123456).");
+      // Limpieza y validación previa de formato
+      const cleanInput = newContactPhone.replace(/\D/g, '');
+
+      if (cleanInput.length < 10 || cleanInput.length > 15) {
+          alert("El número debe tener entre 10 y 15 dígitos numéricos (incluyendo código de país). Ejemplo: 34600123456");
           return;
       }
+      
+      setIsCreating(true);
 
       try {
           const res = await fetch(`${API_URL}/contacts`, {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({
-                  phone: newContactPhone,
+                  phone: cleanInput, // Enviamos el limpio
                   name: newContactName,
                   email: newContactEmail,
                   originPhoneId: selectedAccountId || accounts[0]?.id 
@@ -208,12 +213,13 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
               setNewContactName('');
               setNewContactEmail('');
               socket.emit('request_contacts');
-              alert("Contacto creado y verificado en WhatsApp ✅");
+              alert("Contacto guardado correctamente."); // Mensaje realista
           } else {
-              // Mostramos el error del backend (ej: "No tiene WhatsApp")
-              alert("❌ Error: " + (data.error || "No se pudo crear"));
+              // Mostramos el error que viene del servidor (ej: si Meta dice que no existe)
+              alert("❌ Error: " + (data.error || "No se pudo crear. Verifica que el número tenga WhatsApp."));
           }
       } catch (e) { alert("Error de conexión al crear contacto"); }
+      finally { setIsCreating(false); }
   };
 
   const handleImport = async (e: React.FormEvent) => {
@@ -499,7 +505,9 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                       </div>
                       <div className="flex gap-2 pt-2">
                           <button type="button" onClick={()=>setShowAddContact(false)} className="flex-1 py-3 bg-gray-100 text-slate-600 font-bold rounded-xl hover:bg-gray-200 transition">Cancelar</button>
-                          <button type="submit" className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg transition">Crear</button>
+                          <button type="submit" disabled={isCreating} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg transition disabled:opacity-50">
+                              {isCreating ? 'Guardando...' : 'Crear'}
+                          </button>
                       </div>
                   </form>
               </div>
