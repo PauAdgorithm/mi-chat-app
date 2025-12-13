@@ -166,11 +166,24 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
   // 4. HELPERS
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '';
-    try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
-  };
+  // ... imports ...
 
+// FUNCIÓN DE FECHA BLINDADA
+const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return ''; // Si es inválida, no mostramos nada y evitamos "Invalid Date"
+        
+        const today = new Date();
+        if (date.toDateString() === today.toDateString()) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+    } catch { return ''; }
+};
+
+// ... (Resto del componente igual)
   const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
 
   const cleanMessagePreview = (msg: any) => {
