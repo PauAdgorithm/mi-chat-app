@@ -1,24 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  Users, 
-  Search, 
-  RefreshCw, 
-  UserCheck, 
-  Briefcase, 
-  Filter as FilterIcon, 
-  User, 
-  ChevronDown, 
-  X, 
-  Hash,
-  CheckCircle,
-  Calendar as CalendarIcon,
-  Smartphone,
-  UserPlus,
-  Upload,
-  FileSpreadsheet
+  Users, Search, RefreshCw, UserCheck, Briefcase, Filter as FilterIcon, 
+  User, ChevronDown, X, Hash, CheckCircle, Calendar as CalendarIcon, 
+  Smartphone, UserPlus, Upload, FileSpreadsheet
 } from 'lucide-react';
 
-// --- INTERFACES ---
 export interface Contact {
   id: string;
   phone: string;
@@ -50,14 +36,13 @@ interface SidebarProps {
   typingStatus: { [chatId: string]: string };
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
   
-  // Props Multi-Cuenta
+  // Props para Multi-Cuenta
   selectedAccountId: string | null;
   onSelectAccount: (id: string | null) => void;
 }
 
 type ViewScope = 'all' | 'mine' | 'unassigned';
 
-// --- HELPERS ---
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
@@ -70,84 +55,53 @@ const formatTime = (isoString?: string) => {
         if (isNaN(date.getTime())) return '';
         
         const today = new Date();
-        const isToday = date.getDate() === today.getDate() &&
-                        date.getMonth() === today.getMonth() &&
-                        date.getFullYear() === today.getFullYear();
-
-        if (isToday) {
+        if (date.toDateString() === today.toDateString()) {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
     } catch { return ''; }
 };
 
-const getInitial = (name?: any, phone?: any) => {
-    const display = name || phone || "?";
-    return String(display).charAt(0).toUpperCase();
-};
+const getInitial = (name?: any, phone?: any) => String(name || phone || "?").charAt(0).toUpperCase();
 
 const cleanMessagePreview = (msg: any) => {
     if (!msg) return "Haz clic para ver";
-    if (typeof msg === 'string') {
-        if (msg.includes('[object Object]')) return "Mensaje";
-        return msg;
-    }
+    if (typeof msg === 'string') return msg.includes('[object Object]') ? "Mensaje" : msg;
     if (typeof msg === 'object') return "Mensaje";
     return String(msg);
 };
 
-export function Sidebar({ 
-    user, 
-    socket, 
-    onSelectContact, 
-    selectedContactId, 
-    isConnected = true, 
-    onlineUsers = [], 
-    typingStatus = {}, 
-    setView, 
-    selectedAccountId, 
-    onSelectAccount 
-}: SidebarProps) {
+export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView, selectedAccountId, onSelectAccount }: SidebarProps) {
   
   const isProduction = window.location.hostname.includes('render.com');
   const API_URL = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
 
-  // --- ESTADOS ---
   const [viewScope, setViewScope] = useState<ViewScope>('all'); 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); 
   
-  // Modales
+  // Estados para Modales Nuevos
   const [showAddContact, setShowAddContact] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  
-  // Forms
+
+  // Formulario Nuevo Contacto
   const [newContactPhone, setNewContactPhone] = useState('');
   const [newContactName, setNewContactName] = useState('');
   const [newContactEmail, setNewContactEmail] = useState('');
+  
+  // Importación
   const [importFile, setImportFile] = useState<File|null>(null);
   const [importing, setImporting] = useState(false);
   
-  // Filtros Avanzados
-  const [activeFilters, setActiveFilters] = useState({
-      department: '',
-      status: '',
-      tag: '',
-      agent: ''
-  });
-  
-  // Listas de Configuración
+  const [activeFilters, setActiveFilters] = useState({ department: '', status: '', tag: '', agent: '' });
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
   const [availableDepts, setAvailableDepts] = useState<string[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
-
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // --- EFECTOS ---
 
   useEffect(() => {
     if (socket && isConnected) {
@@ -163,11 +117,7 @@ export function Sidebar({
           const contact = contacts.find(c => c.id === selectedContactId);
           if (contact) {
               const cleanP = normalizePhone(contact.phone);
-              setUnreadCounts(prev => {
-                  const newCounts = { ...prev };
-                  delete newCounts[cleanP];
-                  return newCounts;
-              });
+              setUnreadCounts(prev => { const n = { ...prev }; delete n[cleanP]; return n; });
           }
       }
   }, [selectedContactId, contacts]);
@@ -175,7 +125,6 @@ export function Sidebar({
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
     if (Notification.permission !== 'granted') Notification.requestPermission();
-
     if (!socket) return;
 
     const handleContactsUpdate = (d: any) => { if(Array.isArray(d)) setContacts(d); };
@@ -190,8 +139,7 @@ export function Sidebar({
     socket.on('agents_list', handleAgents);     
     socket.on('config_list', handleConfig);     
     socket.on('contact_updated_notification', () => socket.emit('request_contacts'));
-
-    const handleNewMessageNotification = (msg: any) => {
+    socket.on('message', (msg: any) => {
         const isMe = msg.sender === 'Agente' || msg.sender === user.username;
         if (!isMe) {
             let shouldNotify = true;
@@ -218,10 +166,8 @@ export function Sidebar({
             if (senderClean !== currentContactPhoneClean) setUnreadCounts(prev => ({ ...prev, [senderClean]: (prev[senderClean] || 0) + 1 }));
         }
         socket.emit('request_contacts');
-    };
+    });
 
-    socket.on('message', handleNewMessageNotification);
-    
     const interval = setInterval(() => { if(isConnected) socket.emit('request_contacts'); }, 10000);
 
     return () => {
@@ -229,29 +175,45 @@ export function Sidebar({
       socket.off('agents_list', handleAgents);
       socket.off('config_list', handleConfig);
       socket.off('contact_updated_notification');
-      socket.off('message', handleNewMessageNotification);
+      socket.off('message');
       clearInterval(interval);
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts, user.preferences]);
 
-  // --- FUNCIONES ---
   const handleCreateContact = async (e: React.FormEvent) => {
       e.preventDefault();
+      
+      // Validación previa de formato
+      if (!/^\d{10,15}$/.test(newContactPhone)) {
+          alert("El número debe tener entre 10 y 15 dígitos y contener el código de país (ej: 34600123456).");
+          return;
+      }
+
       try {
-          await fetch(`${API_URL}/contacts`, {
+          const res = await fetch(`${API_URL}/contacts`, {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({
                   phone: newContactPhone,
                   name: newContactName,
                   email: newContactEmail,
-                  originPhoneId: selectedAccountId || (accounts.length > 0 ? accounts[0].id : undefined)
+                  originPhoneId: selectedAccountId || accounts[0]?.id 
               })
           });
-          setShowAddContact(false);
-          setNewContactPhone(''); setNewContactName(''); setNewContactEmail('');
-          socket.emit('request_contacts');
-      } catch (e) { alert("Error al crear contacto"); }
+          const data = await res.json();
+          
+          if (res.ok) {
+              setShowAddContact(false);
+              setNewContactPhone(''); 
+              setNewContactName('');
+              setNewContactEmail('');
+              socket.emit('request_contacts');
+              alert("Contacto creado y verificado en WhatsApp ✅");
+          } else {
+              // Mostramos el error del backend (ej: "No tiene WhatsApp")
+              alert("❌ Error: " + (data.error || "No se pudo crear"));
+          }
+      } catch (e) { alert("Error de conexión al crear contacto"); }
   };
 
   const handleImport = async (e: React.FormEvent) => {
@@ -260,7 +222,8 @@ export function Sidebar({
       setImporting(true);
       const formData = new FormData();
       formData.append('file', importFile);
-      formData.append('originPhoneId', selectedAccountId || (accounts.length > 0 ? accounts[0].id : ''));
+      formData.append('originPhoneId', selectedAccountId || accounts[0]?.id);
+      
       try {
           const res = await fetch(`${API_URL}/contacts/import`, { method: 'POST', body: formData });
           const d = await res.json();
@@ -275,9 +238,7 @@ export function Sidebar({
   };
 
   const filteredContacts = contacts.filter(c => {
-      if (selectedAccountId) {
-          if (c.origin_phone_id && c.origin_phone_id !== selectedAccountId) return false;
-      }
+      if (selectedAccountId && c.origin_phone_id && c.origin_phone_id !== selectedAccountId) return false;
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
@@ -295,11 +256,10 @@ export function Sidebar({
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
-  // --- RENDER ---
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
-      {/* 1. HEADER */}
+      {/* HEADER + BOTONES NUEVOS */}
       <div className="p-4 border-b border-gray-200 bg-white">
         
         {/* SELECTOR DE LÍNEA */}
@@ -413,7 +373,7 @@ export function Sidebar({
         )}
       </div>
       
-      {/* 2. LISTA DE CONTACTOS */}
+      {/* LISTA CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
@@ -441,13 +401,11 @@ export function Sidebar({
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      {/* Nombre y Hora */}
                       <div className="flex justify-between items-baseline mb-1">
                           <span className={`text-sm font-bold truncate ${isSelected ? 'text-blue-700' : 'text-slate-700'}`}>{String(contact.name || contact.phone || "Desconocido")}</span>
                           <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">{formatTime(contact.last_message_time)}</span>
                       </div>
                       
-                      {/* Último Mensaje y Typing */}
                       <div className="flex justify-between items-center w-full">
                           <p className={`text-xs truncate h-4 flex-1 pr-2 ${isTyping ? 'text-green-600 font-bold animate-pulse' : 'text-slate-500'}`}>
                               {isTyping ? "✍️ Escribiendo..." : cleanMessagePreview(contact.last_message)}
@@ -460,9 +418,8 @@ export function Sidebar({
                           )}
                       </div>
 
-                      {/* BADGES / ETIQUETAS (AQUÍ ES DONDE ESTABA EL FALLO ANTES) */}
                       <div className="flex gap-1 mt-2 flex-wrap items-center">
-                          {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide border border-emerald-200">NUEVO</span>}
+                          {contact.status === 'Nuevo' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-md tracking-wide">NUEVO</span>}
                           
                           {/* TAGS */}
                           {contact.tags && contact.tags.slice(0, 2).map(tag => (
@@ -494,12 +451,12 @@ export function Sidebar({
         )}
       </div>
 
-      {/* 3. FOOTER */}
+      {/* FOOTER: Online + Calendario */}
       <div className="bg-slate-50 border-t border-slate-200 p-3">
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                Equipo Online ({onlineUsers.length})
+                Online ({onlineUsers.length})
             </h3>
             <button 
                 onClick={() => setView('calendar')} 
@@ -521,8 +478,6 @@ export function Sidebar({
               ))}
           </div>
       </div>
-
-      {/* --- MODALES --- */}
 
       {/* MODAL CREAR CONTACTO */}
       {showAddContact && (
