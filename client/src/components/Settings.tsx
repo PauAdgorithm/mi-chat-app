@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   User, Plus, Briefcase, ArrowLeft, Trash2, ShieldAlert, CheckCircle, 
   LayoutList, RefreshCw, Pencil, X, MessageSquare, Tag, Zap, BarChart3,
-  Calendar, Bot, Save, Bell, UserPlus // <--- AÑADIDO UserPlus
+  Calendar, Bot, Save, Bell, UserPlus 
 } from 'lucide-react';
 
 // @ts-ignore
@@ -27,7 +27,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
   const [activeTab, setActiveTab] = useState<'team' | 'config' | 'whatsapp' | 'quick_replies' | 'analytics' | 'agenda' | 'bot_config' | 'notifications'>('team');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [configList, setConfigList] = useState<ConfigItem[]>([]);
-  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); 
+  const [phoneLines, setPhoneLines] = useState<{id:string, name:string}[]>([]); 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showMobileMenu, setShowMobileMenu] = useState(true);
@@ -47,7 +47,8 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
   // ESTADOS NOTIFICACIONES
   const [prefDepts, setPrefDepts] = useState<string[]>([]);
   const [prefLines, setPrefLines] = useState<string[]>([]);
-  const [prefNewLeads, setPrefNewLeads] = useState(true); // NUEVO: Por defecto true
+  const [prefNewLeads, setPrefNewLeads] = useState(true); 
+  const [isSaving, setIsSaving] = useState(false); // Estado de carga del botón
 
   const [botPrompt, setBotPrompt] = useState('');
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
@@ -58,16 +59,29 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
     if (socket) {
         socket.emit('request_agents');
         socket.emit('request_config');
-        fetch(`${API_URL}/accounts`).then(r=>r.json()).then(setAccounts).catch(()=>{});
+        fetch(`${API_URL}/accounts`).then(r=>r.json()).then(setPhoneLines).catch(()=>{});
 
-        socket.on('agents_list', (list: Agent[]) => {
-            setAgents(list);
-        });
+        socket.on('agents_list', (list: Agent[]) => { setAgents(list); });
         socket.on('config_list', (list: ConfigItem[]) => setConfigList(list));
-        socket.on('action_error', (msg: string) => setError(msg));
-        socket.on('action_success', (msg: string) => { setSuccess(msg); closeModal(); setTimeout(() => setSuccess(''), 3000); });
+        
+        socket.on('action_error', (msg: string) => {
+            setError(msg);
+            setIsSaving(false);
+        });
+        
+        socket.on('action_success', (msg: string) => { 
+            setSuccess(msg); 
+            setIsSaving(false);
+            closeModal(); 
+            setTimeout(() => setSuccess(''), 3000); 
+        });
     }
-    return () => { socket?.off('agents_list'); socket?.off('config_list'); socket?.off('action_error'); socket?.off('action_success'); };
+    return () => { 
+        socket?.off('agents_list'); 
+        socket?.off('config_list'); 
+        socket?.off('action_error'); 
+        socket?.off('action_success'); 
+    };
   }, [socket, currentUser]);
 
   useEffect(() => {
@@ -88,7 +102,6 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
       const prefs = agent.preferences || {};
       setPrefDepts(prefs.departments || []);
       setPrefLines(prefs.phoneIds || []);
-      // Si no existe la preferencia, asumimos TRUE para no perder leads
       setPrefNewLeads(prefs.notifyNewLeads !== undefined ? prefs.notifyNewLeads : true); 
       setModalType('edit_notifications');
   };
@@ -97,10 +110,12 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
       e.preventDefault();
       if (!selectedItem) return;
       
+      setIsSaving(true); // Activamos loading
+
       const newPrefs = {
           departments: prefDepts,
           phoneIds: prefLines,
-          notifyNewLeads: prefNewLeads // GUARDAMOS NUEVA PREFERENCIA
+          notifyNewLeads: prefNewLeads
       };
 
       socket.emit('update_agent', { 
@@ -118,7 +133,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
       else setList([...list, item]);
   };
 
-  const closeModal = () => { setModalType('none'); setFormName(''); setFormPass(''); setError(''); setSelectedItem(null); setQrTitle(''); setQrContent(''); setQrShortcut(''); };
+  const closeModal = () => { setModalType('none'); setFormName(''); setFormPass(''); setError(''); setSelectedItem(null); setQrTitle(''); setQrContent(''); setQrShortcut(''); setIsSaving(false); };
   const openCreateAgent = () => { setModalType('create_agent'); setFormName(''); setFormRole('Ventas'); setFormPass(''); };
   const openEditAgent = (agent: Agent) => { setSelectedItem(agent); setFormName(agent.name); setFormRole(agent.role); setFormPass(''); setModalType('edit_agent'); };
   const openDeleteAgent = (agent: Agent) => { setSelectedItem(agent); setModalType('delete_agent'); };
@@ -132,6 +147,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
   const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (!socket) return;
+      setIsSaving(true);
       switch (modalType) {
           case 'create_agent': socket.emit('create_agent', { newAgent: { name: formName, role: formRole, password: formPass } }); break;
           case 'edit_agent': const updates: any = { name: formName, role: formRole }; if (formPass) updates.password = formPass; socket.emit('update_agent', { agentId: selectedItem.id, updates }); break;
@@ -200,7 +216,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
 
               {/* PESTAÑA NOTIFICACIONES */}
               {activeTab === 'notifications' && (
-                  <div className="max-w-2xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                       <div className="flex justify-between items-center mb-6">
                           <div>
                               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Bell className="w-6 h-6 text-orange-500" /> Configurar Alertas</h2>
@@ -229,6 +245,7 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
           </div>
       </div>
       
+      {/* MODAL (IGUAL + NOTIFICACIONES) */}
       {modalType !== 'none' && (
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in backdrop-blur-sm">
               <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-2xl p-6 animate-in slide-in-from-bottom-10 md:zoom-in-95 max-h-[90vh] overflow-y-auto">
@@ -258,20 +275,21 @@ export function Settings({ onBack, socket, currentUserRole, quickReplies = [], c
                           <div>
                               <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Líneas de Teléfono</h4>
                               <div className="space-y-2">
-                                  {accounts.map(acc => (
-                                      <button type="button" key={acc.id} onClick={() => toggleSelection(prefLines, acc.id, setPrefLines)} className={`w-full text-left p-3 rounded-lg text-xs font-bold border transition flex justify-between items-center ${prefLines.includes(acc.id) ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-slate-200 text-slate-500'}`}><span>{acc.name}</span>{prefLines.includes(acc.id) && <CheckCircle size={14}/>}</button>
+                                  {phoneLines.map(line => (
+                                      <button type="button" key={line.id} onClick={() => toggleSelection(prefLines, line.id, setPrefLines)} className={`w-full text-left p-3 rounded-lg text-xs font-bold border transition flex justify-between items-center ${prefLines.includes(line.id) ? 'bg-green-50 border-green-500 text-green-700' : 'bg-white border-slate-200 text-slate-500'}`}><span>{line.name}</span>{prefLines.includes(line.id) && <CheckCircle size={14}/>}</button>
                                   ))}
                               </div>
                           </div>
-                          <button type="submit" className="w-full py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg">Guardar Preferencias</button>
+                          <button type="submit" disabled={isSaving} className="w-full py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg disabled:opacity-75">{isSaving ? 'Guardando...' : 'Guardar Preferencias'}</button>
                       </form>
                   ) : (
                       <form onSubmit={handleSubmit} className="space-y-5 pb-safe">
-                          {(modalType.includes('agent') && !modalType.includes('delete')) && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: Laura" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Rol</label><select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"><option value="Ventas">Ventas</option><option value="Taller">Taller</option><option value="Admin">Admin</option></select></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contraseña</label><input type="password" value={formPass} onChange={e => setFormPass(e.target.value)} placeholder={modalType === 'edit_agent' ? "Nueva contraseña (Opcional)" : "Contraseña (Opcional)"} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" /></div></>)}
-                          {(modalType.includes('config') && !modalType.includes('delete')) && (<div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre {formType === 'Department' ? 'Departamento' : formType === 'Status' ? 'Estado' : 'Etiqueta'}</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: VIP" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div>)}
-                          {(modalType === 'add_quick_reply' || modalType === 'edit_quick_reply') && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Título</label><input value={qrTitle} onChange={e => setQrTitle(e.target.value)} placeholder="Ej: Bienvenida" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contenido</label><textarea value={qrContent} onChange={e => setQrContent(e.target.value)} placeholder="El texto que se enviará..." rows={4} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Atajo (Opcional)</label><input value={qrShortcut} onChange={e => setQrShortcut(e.target.value)} placeholder="Ej: /hola" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono" /></div></>)}
+                          {/* ... FORMULARIOS ANTERIORES ... */}
+                          {(modalType.includes('agent') && !modalType.includes('delete')) && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre</label><input value={formName} onChange={e => setFormName(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Rol</label><select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl"><option value="Ventas">Ventas</option><option value="Taller">Taller</option><option value="Admin">Admin</option></select></div></>)}
+                          {(modalType.includes('config') && !modalType.includes('delete')) && (<div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Nombre {formType === 'Department' ? 'Departamento' : formType === 'Status' ? 'Estado' : 'Etiqueta'}</label><input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: VIP" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl" required /></div>)}
+                          {(modalType === 'add_quick_reply' || modalType === 'edit_quick_reply') && (<><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Título</label><input value={qrTitle} onChange={e => setQrTitle(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Contenido</label><textarea value={qrContent} onChange={e => setQrContent(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl resize-none" required /></div><div><label className="text-xs font-bold text-slate-400 uppercase ml-1 mb-1 block">Atajo (Opcional)</label><input value={qrShortcut} onChange={e => setQrShortcut(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono" /></div></>)}
                           {(modalType.includes('delete')) && <div className="bg-red-50 p-4 rounded-xl text-red-600 text-sm font-medium border border-red-100">¿Estás seguro? Esta acción es irreversible.</div>}
-                          <button type="submit" className={`w-full py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition-transform ${modalType.includes('delete') ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-200'}`}>Confirmar Acción</button>
+                          <button type="submit" className={`w-full py-4 rounded-xl font-bold text-white shadow-lg ${modalType.includes('delete') ? 'bg-red-600' : 'bg-slate-900'}`}>Confirmar</button>
                       </form>
                   )}
               </div>
