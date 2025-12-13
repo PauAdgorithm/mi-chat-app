@@ -9,14 +9,13 @@ import multer from 'multer';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
-console.log("🚀 [BOOT] Arrancando servidor MAESTRO (Full Features + Multi-Cuenta)...");
+console.log("🚀 [BOOT] Arrancando servidor MAESTRO (Fix CRM Minúsculas)...");
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// RUTA PING
 app.get('/', (req, res) => {
   res.send('🤖 Servidor Chatgorithm Online 🚀');
 });
@@ -36,10 +35,8 @@ const openaiApiKey = process.env.OPENAI_API_KEY;
 const TABLE_TEMPLATES = 'Templates';
 
 // --- CONFIGURACIÓN MULTI-CUENTA ---
-// Mapea el PhoneID con su Token Permanente.
 const BUSINESS_ACCOUNTS: Record<string, string> = {
     [waPhoneId || 'default']: waToken || '',
-    // Añade aquí otros números: 'PHONE_ID': 'TOKEN'
 };
 
 const getToken = (phoneId: string) => BUSINESS_ACCOUNTS[phoneId] || waToken;
@@ -100,7 +97,7 @@ async function getAvailableAppointments() {
         }).all();
         
         const now = new Date();
-        const validRecords = records.filter(r => new Date(r.get('Date') as string) > now).slice(0, 20);
+        const validRecords = records.filter(r => new Date(r.get('Date') as string) > now).slice(0, 15);
         if (validRecords.length === 0) return "No hay citas disponibles.";
         
         return validRecords.map(r => {
@@ -115,7 +112,7 @@ async function getAvailableAppointments() {
 
 async function bookAppointment(appointmentId: string, clientPhone: string, clientName: string) {
     if (!base) return "Error BD";
-    // Fix Regex ID: Extraer solo la parte que parece un ID de Airtable
+    // Fix Regex ID
     const idMatch = appointmentId.match(/rec[a-zA-Z0-9]+/);
     const cleanId = idMatch ? idMatch[0] : appointmentId.trim().replace(/['"]/g, '');
     
@@ -212,20 +209,19 @@ async function processAI(text: string, contactPhone: string, contactName: string
         const msg = runner.choices[0].message;
 
         if (msg.tool_calls && msg.tool_calls.length > 0) {
-            const toolCall = msg.tool_calls[0] as any; // Cast as any
+            const toolCall = msg.tool_calls[0] as any;
             const args = JSON.parse(toolCall.function.arguments);
-            let toolResult = "";
+            let res = "";
 
-            if (toolCall.function.name === "get_available_appointments") toolResult = await getAvailableAppointments();
-            else if (toolCall.function.name === "book_appointment") toolResult = await bookAppointment(args.appointmentId, contactPhone, contactName);
-            else if (toolCall.function.name === "assign_department") toolResult = await assignDepartment(contactPhone, args.department);
-            else if (toolCall.function.name === "stop_conversation") toolResult = await stopConversation(contactPhone);
+            if (toolCall.function.name === "get_available_appointments") res = await getAvailableAppointments();
+            else if (toolCall.function.name === "book_appointment") res = await bookAppointment(args.appointmentId, contactPhone, contactName);
+            else if (toolCall.function.name === "assign_department") res = await assignDepartment(contactPhone, args.department);
+            else if (toolCall.function.name === "stop_conversation") res = await stopConversation(contactPhone);
 
-            const secondResponse = await openai.chat.completions.create({
-                model: "gpt-4o",
-                messages: [ ...messages, msg, { role: "tool", tool_call_id: toolCall.id, content: toolResult } ] as any
+            const reply = await openai.chat.completions.create({
+                model: "gpt-4o", messages: [...messages, msg, { role: "tool", tool_call_id: toolCall.id, content: res }] as any
             });
-            if (secondResponse.choices[0].message.content) await sendWhatsAppText(contactPhone, secondResponse.choices[0].message.content, originPhoneId);
+            if (reply.choices[0].message.content) await sendWhatsAppText(contactPhone, reply.choices[0].message.content, originPhoneId);
         } else if (msg.content) {
             await sendWhatsAppText(contactPhone, msg.content, originPhoneId);
         }
@@ -296,13 +292,11 @@ app.post('/webhook', async (req, res) => {
 //  RUTAS API
 // ==========================================
 
-// Cuentas
 app.get('/api/accounts', (req, res) => {
     const accounts = Object.keys(BUSINESS_ACCOUNTS).map(id => ({ id, name: `Línea ${id.slice(-4)}` }));
     res.json(accounts);
 });
 
-// Agenda
 app.get('/api/appointments', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
@@ -355,13 +349,11 @@ app.post('/api/appointments/generate', async (req, res) => {
 app.put('/api/appointments/:id', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
-        const { date, status, clientPhone, clientName } = req.body;
-        const fields: any = {};
-        if (date) fields["Date"] = date;
-        if (status) fields["Status"] = status;
-        if (clientPhone !== undefined) fields["ClientPhone"] = clientPhone;
-        if (clientName !== undefined) fields["ClientName"] = clientName;
-        await base('Appointments').update([{ id: req.params.id, fields }]);
+        const f:any={}; 
+        if(req.body.status)f["Status"]=req.body.status; 
+        if(req.body.clientPhone)f["ClientPhone"]=req.body.clientPhone; 
+        if(req.body.clientName)f["ClientName"]=req.body.clientName;
+        await base('Appointments').update([{ id: req.params.id, fields: f }]);
         res.json({ success: true });
     } catch(e) { res.status(400).json({error: "Error updating"}); }
 });
@@ -371,12 +363,10 @@ app.delete('/api/appointments/:id', async (req, res) => {
     try { await base('Appointments').destroy([req.params.id]); res.json({ success: true }); } catch(e) { res.status(400).json({error: "Error deleting"}); }
 });
 
-// Templates
+// Templates (FULL LOGIC)
 app.get('/api/templates', async (req, res) => { if (!base) return res.status(500).json({}); const r = await base(TABLE_TEMPLATES).select().all(); res.json(r.map(x => ({ id: x.id, name: x.get('Name'), status: x.get('Status'), body: x.get('Body'), variableMapping: x.get('VariableMapping') ? JSON.parse(x.get('VariableMapping') as string) : {} }))); });
 app.post('/api/create-template', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { const { name, category, body, language, footer, variableExamples } = req.body; let metaId = "meta_simulado_" + Date.now(); let status = "PENDING"; if (waToken && waBusinessId) { try { const metaPayload: any = { name, category, allow_category_change: true, language, components: [{ type: "BODY", text: body }] }; if (footer) metaPayload.components.push({ type: "FOOTER", text: footer }); const metaRes = await axios.post(`https://graph.facebook.com/v18.0/${waBusinessId}/message_templates`, metaPayload, { headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' } }); metaId = metaRes.data.id; status = metaRes.data.status || "PENDING"; } catch (metaError: any) { status = "REJECTED"; } } const createdRecords = await base(TABLE_TEMPLATES).create([{ fields: { "Name": name, "Category": category, "Language": language, "Body": body, "Footer": footer, "Status": status, "MetaId": metaId, "VariableMapping": JSON.stringify(variableExamples || {}) } }]); res.json({ success: true, template: { id: createdRecords[0].id } }); } catch (error: any) { res.status(400).json({ success: false, error: error.message }); } });
 app.delete('/api/delete-template/:id', async (req, res) => { if (!base) return res.status(500).json({ error: "DB" }); try { await base(TABLE_TEMPLATES).destroy([req.params.id]); res.json({ success: true }); } catch (error: any) { res.status(500).json({ error: "Error" }); } });
-
-// Send Template
 app.post('/api/send-template', async (req, res) => {
     const { templateName, language, phone, variables, senderName, originPhoneId } = req.body;
     const token = getToken(originPhoneId || waPhoneId || "default");
@@ -391,7 +381,6 @@ app.post('/api/send-template', async (req, res) => {
     } catch (e: any) { res.status(400).json({ error: "Error envío" }); }
 });
 
-// Analytics (FULL LOGIC)
 app.get('/api/analytics', async (req, res) => {
     if (!base) return res.status(500).json({ error: "DB" });
     try {
@@ -411,7 +400,6 @@ app.get('/api/analytics', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Error" }); }
 });
 
-// Media & Upload
 app.get('/api/media/:id', async (req, res) => { if (!waToken) return res.sendStatus(500); try { const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${req.params.id}`, { headers: { 'Authorization': `Bearer ${waToken}` } }); const mediaRes = await axios.get(urlRes.data.url, { headers: { 'Authorization': `Bearer ${waToken}` }, responseType: 'stream' }); res.setHeader('Content-Type', mediaRes.headers['content-type']); mediaRes.data.pipe(res); } catch (e) { res.sendStatus(404); } });
 app.post('/api/upload', upload.single('file'), async (req: any, res: any) => { 
     try { 
@@ -438,19 +426,28 @@ app.post('/api/upload', upload.single('file'), async (req: any, res: any) => {
 app.get('/api/bot-config', async (req, res) => { if(!base) return res.sendStatus(500); try { const r = await base('BotSettings').select({ filterByFormula: "{Setting} = 'system_prompt'", maxRecords: 1 }).firstPage(); res.json({ prompt: r.length > 0 ? r[0].get('Value') : DEFAULT_SYSTEM_PROMPT }); } catch(e) { res.status(500).json({error:"Error"}); } });
 app.post('/api/bot-config', async (req, res) => { if(!base) return res.sendStatus(500); try { const { prompt } = req.body; const r = await base('BotSettings').select({ filterByFormula: "{Setting} = 'system_prompt'", maxRecords: 1 }).firstPage(); if (r.length > 0) await base('BotSettings').update([{ id: r[0].id, fields: { "Value": prompt } }]); else await base('BotSettings').create([{ fields: { "Setting": "system_prompt", "Value": prompt } }]); res.json({ success: true }); } catch(e) { res.status(500).json({error: "Error"}); } });
 
-// --- HELPERS DB ---
+// --- HELPERS DB (FIX DUPLICADOS) ---
 async function handleContactUpdate(phone: string, text: string, name: string = "Cliente", originId: string = "unknown") {
   if (!base) return null;
   const clean = cleanNumber(phone);
   try {
     let r = await base('Contacts').select({ filterByFormula: `AND({phone}='${clean}', {origin_phone_id}='${originId}')`, maxRecords: 1 }).firstPage();
     if (r.length === 0) {
-        // Fix huérfanos: Si no existe, buscamos si hay uno sin asignar y lo adoptamos
+        // Buscar huérfano
         const orphan = await base('Contacts').select({ filterByFormula: `AND({phone}='${clean}', {origin_phone_id}='')`, maxRecords: 1 }).firstPage();
-        if (orphan.length > 0) { await base('Contacts').update([{ id: orphan[0].id, fields: { "origin_phone_id": originId } }]); r = [orphan[0]]; }
+        if (orphan.length > 0) {
+            await base('Contacts').update([{ id: orphan[0].id, fields: { "origin_phone_id": originId } }]);
+            r = [orphan[0]];
+        }
     }
-    if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: { "last_message": text, "last_message_time": new Date().toISOString() } }]); return r[0]; } 
-    else { const n = await base('Contacts').create([{ fields: { "phone": clean, "name": name, "status": "Nuevo", "last_message": text, "last_message_time": new Date().toISOString(), "origin_phone_id": originId } }]); io.emit('contact_updated_notification'); return n[0]; }
+    if (r.length > 0) {
+      await base('Contacts').update([{ id: r[0].id, fields: { "last_message": text, "last_message_time": new Date().toISOString() } }]);
+      return r[0];
+    } else {
+      const n = await base('Contacts').create([{ fields: { "phone": clean, "name": name, "status": "Nuevo", "last_message": text, "last_message_time": new Date().toISOString(), "origin_phone_id": originId } }]);
+      io.emit('contact_updated_notification');
+      return n[0];
+    }
   } catch (e) { console.error("Error Contactos:", e); return null; }
 }
 
@@ -462,16 +459,19 @@ async function saveAndEmitMessage(msg: any) {
 
 // --- SOCKETS ---
 io.on('connection', (socket) => {
-  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('Name'), type: x.get('Type') }))); } });
-  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "Name": data.name, "Type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Añadido'); } });
-  socket.on('delete_config', async (id) => { if (base) { const realId = (typeof id === 'object' && id.id) ? id.id : id; await base('Config').destroy([realId]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Eliminado'); } });
-  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "Name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('Name'), type: r.get('Type') }))); socket.emit('action_success', 'Actualizado'); } });
+  // CONFIG (FIX MINÚSCULAS)
+  socket.on('request_config', async () => { if (base) { const r = await base('Config').select().all(); socket.emit('config_list', r.map(x => ({ id: x.id, name: x.get('name'), type: x.get('type') }))); } });
+  socket.on('add_config', async (data) => { if (base) { await base('Config').create([{ fields: { "name": data.name, "type": data.type } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
+  socket.on('delete_config', async (id) => { if (base) { const realId = (typeof id === 'object' && id.id) ? id.id : id; await base('Config').destroy([realId]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
+  socket.on('update_config', async (d) => { if (base) { await base('Config').update([{ id: d.id, fields: { "name": d.name } }]); io.emit('config_list', (await base('Config').select().all()).map(r => ({ id: r.id, name: r.get('name'), type: r.get('type') }))); } });
 
+  // Quick Replies
   socket.on('request_quick_replies', async () => { if (base) { const r = await base('QuickReplies').select().all(); socket.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('add_quick_reply', async (d) => { if (base) { await base('QuickReplies').create([{ fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('delete_quick_reply', async (id) => { if (base) { await base('QuickReplies').destroy([id]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
   socket.on('update_quick_reply', async (d) => { if (base) { await base('QuickReplies').update([{ id: d.id, fields: { "Title": d.title, "Content": d.content, "Shortcut": d.shortcut } }]); const r = await base('QuickReplies').select().all(); io.emit('quick_replies_list', r.map(x => ({ id: x.id, title: x.get('Title'), content: x.get('Content'), shortcut: x.get('Shortcut') }))); } });
 
+  // Agents (FIX NOTIFICATIONS)
   socket.on('request_agents', async () => { if (base) { const r = await base('Agents').select().all(); socket.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password'), preferences: x.get('NotificationPrefs') ? JSON.parse(x.get('NotificationPrefs') as string) : {} }))); } });
   socket.on('login_attempt', async (data) => { if(!base) return; const r = await base('Agents').select({ filterByFormula: `{name} = '${data.name}'`, maxRecords: 1 }).firstPage(); if (r.length > 0) { const pwd = r[0].get('password'); const prefs = r[0].get('NotificationPrefs') ? JSON.parse(r[0].get('NotificationPrefs') as string) : {}; if (!pwd || String(pwd).trim() === "" || String(pwd) === String(data.password)) socket.emit('login_success', { username: r[0].get('name'), role: r[0].get('role'), preferences: prefs }); else socket.emit('login_error', 'Contraseña incorrecta'); } else socket.emit('login_error', 'Usuario no encontrado'); });
   socket.on('create_agent', async (d) => { if (!base) return; await base('Agents').create([{ fields: { "name": d.newAgent.name, "role": d.newAgent.role, "password": d.newAgent.password || "" } }]); const r = await base('Agents').select().all(); io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password') }))); socket.emit('action_success', 'Creado'); });
@@ -485,12 +485,16 @@ io.on('connection', (socket) => {
         const r = await base('Agents').select().all(); 
         io.emit('agents_list', r.map(x => ({ id: x.id, name: x.get('name'), role: x.get('role'), hasPassword: !!x.get('password'), preferences: x.get('NotificationPrefs') ? JSON.parse(x.get('NotificationPrefs') as string) : {} }))); 
         socket.emit('action_success', 'Actualizado');
-    } catch(e) { socket.emit('action_error', 'Error guardando'); }
+    } catch(e) { 
+        console.error(e);
+        socket.emit('action_error', 'Error guardando. Revisa Airtable.'); 
+    }
   });
 
   socket.on('request_contacts', async () => { if (base) { const r = await base('Contacts').select({ sort: [{ field: "last_message_time", direction: "desc" }] }).all(); socket.emit('contacts_update', r.map(x => ({ id: x.id, phone: x.get('phone'), name: x.get('name'), status: x.get('status'), department: x.get('department'), assigned_to: x.get('assigned_to'), last_message: x.get('last_message'), last_message_time: x.get('last_message_time'), avatar: (x.get('avatar') as any[])?.[0]?.url, tags: x.get('tags') || [], origin_phone_id: x.get('origin_phone_id') }))); } });
   socket.on('request_conversation', async (p) => { if (base) { const c = cleanNumber(p); const r = await base('Messages').select({ filterByFormula: `OR({sender}='${c}',{recipient}='${c}')`, sort: [{ field: "timestamp", direction: "asc" }] }).all(); socket.emit('conversation_history', r.map(x => ({ text: x.get('text'), sender: x.get('sender'), timestamp: x.get('timestamp'), type: x.get('type'), mediaId: x.get('media_id') }))); } });
   socket.on('update_contact_info', async (data) => { if(base) { const clean = cleanNumber(data.phone); const r = await base('Contacts').select({ filterByFormula: `{phone} = '${clean}'` }).firstPage(); if (r.length > 0) { await base('Contacts').update([{ id: r[0].id, fields: data.updates }], { typecast: true }); io.emit('contact_updated_notification'); } } });
+
   socket.on('chatMessage', async (msg) => { const originId = msg.originPhoneId || waPhoneId || "default"; const token = getToken(originId); if (token) { try { if (msg.type !== 'note') { await axios.post(`https://graph.facebook.com/v17.0/${originId}/messages`, { messaging_product: "whatsapp", to: cleanNumber(msg.targetPhone), type: "text", text: { body: msg.text } }, { headers: { Authorization: `Bearer ${token}` } }); } await saveAndEmitMessage({ text: msg.text, sender: msg.sender, recipient: msg.targetPhone, type: msg.type || 'text', origin_phone_id: originId, timestamp: new Date().toISOString() }); const prev = msg.type === 'note' ? `📝 Nota: ${msg.text}` : `Tú: ${msg.text}`; await handleContactUpdate(msg.targetPhone, prev, undefined, originId); } catch (e: any) { console.error("Error envío:", e.message); } } });
   
   socket.on('trigger_ai_manual', async (data) => { const { phone } = data; const originId = waPhoneId || "default"; if (base) { activeAiChats.add(cleanNumber(phone)); io.emit('ai_active_change', { phone: cleanNumber(phone), active: true }); const records = await base('Contacts').select({ filterByFormula: `{phone} = '${cleanNumber(phone)}'` }).firstPage(); const name = (records.length > 0) ? (records[0].get('name') as string) : "Cliente"; const msgs = await base('Messages').select({ filterByFormula: `OR({sender}='${cleanNumber(phone)}',{recipient}='${cleanNumber(phone)}')`, sort: [{field: "timestamp", direction: "desc"}], maxRecords: 1 }).firstPage(); const text = msgs.length > 0 ? (msgs[0].get('text') as string) : "Hola"; processAI(text, phone, name, originId); } });
