@@ -26,7 +26,7 @@ interface ChatWindowProps {
   typingInfo: { [chatId: string]: string };
   onOpenTemplates: () => void;
   quickReplies?: QuickReply[]; 
-  currentAccountId?: string; // Recibimos el ID de origen (Multi-cuenta)
+  currentAccountId?: string;
 }
 
 interface Message {
@@ -47,6 +47,12 @@ interface SearchMatch {
     msgIndex: number;
     matchIndex: number; 
 }
+
+// --- HELPER LOCAL ---
+const normalizePhone = (phone: string) => {
+  if (!phone) return "";
+  return phone.replace(/\D/g, "");
+};
 
 const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false); const [progress, setProgress] = useState(0); const [duration, setDuration] = useState(0); const [currentTime, setCurrentTime] = useState(0); const [playbackRate, setPlaybackRate] = useState(1); const [volume, setVolume] = useState(1); const [isMuted, setIsMuted] = useState(false); const [showVolumeSlider, setShowVolumeSlider] = useState(false); const [audioUrl, setAudioUrl] = useState<string | null>(null); const [isReady, setIsReady] = useState(false); const audioRef = useRef<HTMLAudioElement>(null);
@@ -107,20 +113,18 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const matchingQR = quickReplies.find(qr => qr.shortcut && qr.shortcut === input.trim());
   const typingUser = typingInfo[contact.phone] || null;
   
-  // --- AÑADIDA LA DEFINICIÓN DE isOnline QUE FALTABA ---
   const isOnline = onlineUsers.some(u => {
       if (!u) return false;
       const userLower = u.toLowerCase().trim();
       const contactName = (contact.name || '').toLowerCase().trim();
       const contactPhone = (contact.phone || '').replace(/\D/g, ''); 
-      // Comprobar si el nombre o el teléfono del contacto están en la lista de usuarios online
       if (contactName && userLower === contactName) return true;
       if (contactPhone && userLower === contactPhone) return true;
       return false;
   });
 
-  // LÓGICA VENTANA 24H
-  const [is24hWindowOpen, setIs24hWindowOpen] = useState(true);
+  // LÓGICA VENTANA 24H (EMPIEZA CERRADA POR SEGURIDAD)
+  const [is24hWindowOpen, setIs24hWindowOpen] = useState(false);
   const [windowTimeLeft, setWindowTimeLeft] = useState<string>('');
 
   const lastTypingTimeRef = useRef<number>(0);
@@ -187,16 +191,22 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // Cálculo Ventana 24h
   useEffect(() => {
     const checkWindow = () => {
-        const lastCustomerMsg = [...messages].reverse().find(m => m.sender === contact.phone);
+        // Encontrar el último mensaje DEL CLIENTE
+        // Normalizamos el teléfono del contacto para asegurar match
+        const myPhone = normalizePhone(contact.phone);
+        const lastCustomerMsg = [...messages].reverse().find(m => normalizePhone(m.sender) === myPhone);
+        
         if (!lastCustomerMsg) {
+            // Si no hay mensajes del cliente, ventana CERRADA (por seguridad)
             setIs24hWindowOpen(false); 
-            setWindowTimeLeft("Sin historial reciente");
+            setWindowTimeLeft("Sin historial");
             return;
         }
+
         const lastMsgTime = new Date(lastCustomerMsg.timestamp).getTime();
         const now = Date.now();
         const diff = now - lastMsgTime;
-        const limit = 24 * 60 * 60 * 1000; 
+        const limit = 24 * 60 * 60 * 1000; // 24 horas
 
         if (diff < limit) {
             setIs24hWindowOpen(true);
