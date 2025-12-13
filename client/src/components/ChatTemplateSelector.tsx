@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  X, 
-  Search, 
-  ChevronRight, 
-  Send, 
-  Loader2, 
-  User,
-  LayoutTemplate
+  X, Search, ChevronRight, Send, Loader2, User, LayoutTemplate
 } from 'lucide-react';
 
 interface Template {
@@ -18,19 +12,17 @@ interface Template {
   language: string;
 }
 
-// CORRECCIÓN: Añadido senderName a la interfaz
 interface ChatTemplateSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   targetPhone: string;
-  senderName: string; // <--- ¡AQUÍ ESTABA EL ERROR!
+  senderName: string;
+  originPhoneId?: string; // <--- PROPIEDAD AÑADIDA
 }
 
-const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onClose, targetPhone, senderName }) => {
+const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onClose, targetPhone, senderName, originPhoneId }) => {
   const isProduction = window.location.hostname.includes('render.com');
-  const API_URL_BASE = isProduction
-    ? 'https://chatgorithm.onrender.com/api' 
-    : 'http://localhost:3000/api';
+  const API_URL_BASE = isProduction ? 'https://chatgorithm.onrender.com/api' : 'http://localhost:3000/api';
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +85,8 @@ const ChatTemplateSelector: React.FC<ChatTemplateSelectorProps> = ({ isOpen, onC
         phone: targetPhone,
         variables: Object.values(variableValues),
         previewText: finalText,
-        senderName: senderName // <--- Usamos el nombre real del agente
+        senderName: senderName,
+        originPhoneId: originPhoneId // <--- ENVIAMOS EL ORIGEN AL SERVIDOR
       };
 
       const response = await fetch(`${API_URL_BASE}/send-template`, {

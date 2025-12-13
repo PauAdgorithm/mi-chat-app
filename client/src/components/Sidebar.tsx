@@ -5,14 +5,17 @@ import {
   RefreshCw, 
   UserCheck, 
   Briefcase, 
-  Filter, 
+  Filter as FilterIcon, 
   User, 
   ChevronDown, 
   X, 
   Hash,
   CheckCircle,
-  Calendar as CalendarIcon 
+  Calendar as CalendarIcon,
+  Smartphone 
 } from 'lucide-react';
+
+// --- EXPORTACIONES CLAVE (IMPORTANTE: MANTENER 'export') ---
 
 export interface Contact {
   id: string;
@@ -29,6 +32,7 @@ export interface Contact {
   notes?: string;
   signup_date?: string; 
   tags?: string[];
+  origin_phone_id?: string;
 }
 
 interface Agent { id: string; name: string; }
@@ -43,24 +47,27 @@ interface SidebarProps {
   onlineUsers: string[];
   typingStatus: { [chatId: string]: string };
   setView: (view: 'chat' | 'settings' | 'calendar') => void;
+  
+  // Props para Multi-Cuenta
+  selectedAccountId: string | null;
+  onSelectAccount: (id: string | null) => void;
 }
 
-type FilterType = 'all' | 'mine' | 'unassigned' | 'agent' | 'department';
+type ViewScope = 'all' | 'mine' | 'unassigned';
 
 const normalizePhone = (phone: string) => {
   if (!phone) return "";
   return phone.replace(/\D/g, "");
 };
 
-export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView }: SidebarProps) {
-  // 1. ESTADOS (MOVIDOS AQUÍ ARRIBA PARA EVITAR EL ERROR DE PANTALLA BLANCA)
-  const [viewScope, setViewScope] = useState<'all' | 'mine' | 'unassigned'>('all');
+export function Sidebar({ user, socket, onSelectContact, selectedContactId, isConnected = true, onlineUsers = [], typingStatus = {}, setView, selectedAccountId, onSelectAccount }: SidebarProps) {
+  
+  // 1. ESTADOS
+  const [viewScope, setViewScope] = useState<ViewScope>('all'); 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  const [filter, setFilter] = useState<FilterType>('all');
-  const [filterValue, setFilterValue] = useState<string>(''); 
   const [showFilters, setShowFilters] = useState(false);
+  const [accounts, setAccounts] = useState<{id:string, name:string}[]>([]); // Lista de números
   
   const [activeFilters, setActiveFilters] = useState({
       department: '',
@@ -77,14 +84,18 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
   const [unreadCounts, setUnreadCounts] = useState<{ [phone: string]: number }>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // 2. CARGA INICIAL
   useEffect(() => {
     if (socket && isConnected) {
         socket.emit('request_contacts');
         socket.emit('request_agents'); 
         socket.emit('request_config'); 
+        // Pedir cuentas
+        fetch('/api/accounts').then(r=>r.json()).then(setAccounts).catch(()=>{});
     }
   }, [socket, isConnected]);
 
+  // Limpiar unread al seleccionar
   useEffect(() => {
       if (selectedContactId) {
           const contact = contacts.find(c => c.id === selectedContactId);
@@ -99,6 +110,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
       }
   }, [selectedContactId, contacts]);
 
+  // 3. LISTENERS DEL SOCKET
   useEffect(() => {
     audioRef.current = new Audio('/notification.mp3');
     if (Notification.permission !== 'granted') Notification.requestPermission();
@@ -153,6 +165,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     };
   }, [socket, user.username, isConnected, selectedContactId, contacts]);
 
+  // 4. HELPERS
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     try { return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch { return ''; }
@@ -167,14 +180,20 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
     return String(msg);
   };
 
-  // --- LÓGICA DE FILTRADO (Ahora segura porque viewScope ya existe) ---
+  // 5. LÓGICA DE FILTRADO
   const filteredContacts = contacts.filter(c => {
+      // Filtro Multi-Cuenta
+      if (selectedAccountId && c.origin_phone_id !== selectedAccountId) return false;
+
+      // Filtro Búsqueda
       const matchesSearch = (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (c.phone || "").includes(searchQuery);
       if (!matchesSearch) return false;
 
+      // Filtro Vistas
       if (viewScope === 'mine' && c.assigned_to !== user.username) return false;
       if (viewScope === 'unassigned' && c.assigned_to) return false;
 
+      // Filtros Avanzados
       if (activeFilters.department && c.department !== activeFilters.department) return false;
       if (activeFilters.status && c.status !== activeFilters.status) return false;
       if (activeFilters.agent && c.assigned_to !== activeFilters.agent) return false;
@@ -189,21 +208,31 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
 
   const hasActiveFilters = Object.values(activeFilters).some(v => v !== '');
 
-  const handleFilterClick = (type: FilterType) => {
-      // Compatibilidad con botones antiguos si fuera necesario, 
-      // pero ahora usamos viewScope para las tabs principales.
-      if (type === 'all' || type === 'mine' || type === 'unassigned') {
-          setViewScope(type as any);
-      } else {
-          // Lógica para togglear el panel de filtros si pulsas botones extra
-          setShowFilters(true);
-      }
-  };
-
   return (
     <div className="h-full flex flex-col w-full bg-slate-50 border-r border-gray-200">
       
+      {/* CABECERA */}
       <div className="p-4 border-b border-gray-200 bg-white">
+        
+        {/* SELECTOR DE PERFIL (MULTI-CUENTA) */}
+        <div className="mb-4">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1 block">Línea Activa</label>
+            <div className="relative">
+                <Smartphone className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                <select 
+                    value={selectedAccountId || ''} 
+                    onChange={(e) => onSelectAccount(e.target.value || null)}
+                    className="w-full pl-9 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
+                >
+                    <option value="">Todas las Líneas</option>
+                    {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>{acc.name}</option>
+                    ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-3 w-3 h-3 text-slate-400 pointer-events-none" />
+            </div>
+        </div>
+
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex justify-between items-center">
             Bandeja de Entrada
             {!isConnected && <span className="text-[10px] text-red-500 animate-pulse">● Sin conexión</span>}
@@ -226,7 +255,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
                 className={`p-2 rounded-lg transition-all border ${showFilters || hasActiveFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                 title="Filtros Avanzados"
             >
-                {hasActiveFilters ? <Filter className="w-4 h-4 fill-current" /> : <Filter className="w-4 h-4" />}
+                {hasActiveFilters ? <FilterIcon className="w-4 h-4 fill-current" /> : <FilterIcon className="w-4 h-4" />}
             </button>
         </div>
 
@@ -274,11 +303,12 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
       
+      {/* LISTA CONTACTOS */}
       <div className="flex-1 overflow-y-auto">
         {filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm p-6 text-center">
                 <div className={`p-3 rounded-full mb-2 ${isConnected ? 'bg-slate-100' : 'bg-red-50'}`}>
-                    {hasActiveFilters ? <Filter className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
+                    {hasActiveFilters ? <FilterIcon className="w-5 h-5 text-slate-400" /> : <RefreshCw className={`w-5 h-5 ${isConnected ? 'animate-spin text-blue-400' : 'text-red-400'}`} />}
                 </div>
                 <p>{isConnected ? (hasActiveFilters ? "No hay chats con estos filtros" : "Cargando chats...") : "Esperando conexión..."}</p>
             </div>
@@ -340,6 +370,7 @@ export function Sidebar({ user, socket, onSelectContact, selectedContactId, isCo
         )}
       </div>
 
+      {/* FOOTER: Online + Calendario */}
       <div className="bg-slate-50 border-t border-slate-200 p-3">
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">

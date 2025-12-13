@@ -8,7 +8,14 @@ import {
 } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { Contact } from './Sidebar';
-import { QuickReply } from '../App'; 
+
+// Definimos la interfaz aquí para evitar dependencias circulares
+interface QuickReply {
+    id: string;
+    title: string;
+    content: string;
+    shortcut: string;
+}
 
 interface ChatWindowProps {
   socket: any;
@@ -20,6 +27,7 @@ interface ChatWindowProps {
   typingInfo: { [chatId: string]: string };
   onOpenTemplates: () => void;
   quickReplies?: QuickReply[]; 
+  currentAccountId?: string; // Recibimos el ID de origen (Multi-cuenta)
 }
 
 interface Message {
@@ -57,7 +65,7 @@ const CustomAudioPlayer = ({ src, isMe }: { src: string, isMe: boolean }) => {
   return ( <div className={`flex items-start gap-2 p-2 rounded-xl w-full max-w-[320px] select-none transition-colors ${isMe ? 'bg-[#dcf8c6]' : 'bg-white border border-slate-100'}`}> <audio ref={audioRef} src={audioUrl!} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} className="hidden" /> <button onClick={togglePlay} className={`w-10 h-10 flex items-center justify-center rounded-full transition shadow-sm flex-shrink-0 mt-0.5 ${isMe ? 'bg-[#00a884] text-white hover:bg-[#008f6f]' : 'bg-slate-500 text-white hover:bg-slate-600'}`}> {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />} </button> <div className="flex-1 flex flex-col gap-1 w-full min-w-0"> <div className="h-5 flex items-center"><input type="range" min="0" max="100" value={progress} onChange={handleSeek} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${isMe ? 'accent-[#00a884] bg-green-200' : 'accent-slate-500 bg-slate-200'}`} /></div> <div className="flex justify-between items-center text-[10px] font-medium text-slate-500 h-5 w-full"> <span className="font-mono tabular-nums min-w-[35px]">{currentTime === 0 && !isPlaying ? formatTime(duration) : formatTime(currentTime)}</span> <div className="flex items-center gap-2"> <button onClick={toggleSpeed} className="px-1.5 py-0.5 bg-black/5 rounded text-[9px] font-bold min-w-[22px] text-center">{playbackRate}x</button> <div className="relative flex items-center group hidden sm:flex" onMouseEnter={() => setShowVolumeSlider(true)} onMouseLeave={() => setShowVolumeSlider(false)}> <button onClick={toggleMute} className="p-1 hover:text-slate-800"><Volume2 className="w-3.5 h-3.5" /></button> {showVolumeSlider && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg p-2 z-20"><div className="h-16 w-4 flex items-center justify-center"><input type="range" min="0" max="1" step="0.1" value={isMuted ? 0 : volume} onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(parseFloat(e.target.value) === 0); }} className="-rotate-90 w-14 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div></div>} </div> <a href={src} download="audio.webm" target="_blank" rel="noreferrer" className="p-1 hover:bg-black/5 rounded-full"><Download className="w-3.5 h-3.5" /></a> </div> </div> </div> </div> );
 };
 
-export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates, quickReplies = [] }: ChatWindowProps) {
+export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers, typingInfo, onOpenTemplates, quickReplies = [], currentAccountId }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -85,6 +93,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const [isSaving, setIsSaving] = useState(false);
   
   const [showQuickRepliesList, setShowQuickRepliesList] = useState(false);
+
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
@@ -165,19 +174,23 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   // --- LISTENERS DE IA ---
   useEffect(() => {
       if (!socket) return;
+      
       const handleAiStatus = (data: { phone: string, status: string }) => {
           if (data.phone === contact.phone) {
               setAiThinking(data.status === 'thinking');
               if (data.status === 'thinking') scrollToBottom();
           }
       };
+
       const handleAiActive = (data: { phone: string, active: boolean }) => {
           if (data.phone === contact.phone) {
               setIsAiActive(data.active);
           }
       };
+
       socket.on('ai_status', handleAiStatus);
       socket.on('ai_active_change', handleAiActive);
+      
       return () => { 
           socket.off('ai_status', handleAiStatus); 
           socket.off('ai_active_change', handleAiActive);
@@ -214,7 +227,14 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
     // 2. Si hay texto, lo enviamos
     const finalInput = matchingQR ? matchingQR.content : input;
     if (finalInput.trim()) { 
-        const msg = { text: finalInput, sender: user.username, targetPhone: contact.phone, timestamp: new Date().toISOString(), type: isInternalMode ? 'note' : 'text' }; 
+        const msg = { 
+            text: finalInput, 
+            sender: user.username, 
+            targetPhone: contact.phone, 
+            timestamp: new Date().toISOString(), 
+            type: isInternalMode ? 'note' : 'text',
+            originPhoneId: currentAccountId // <--- ENVÍO DEL ID DE ORIGEN
+        }; 
         socket.emit('chatMessage', msg); 
         setInput(''); setShowEmojiPicker(false); setIsInternalMode(false); 
         
@@ -242,7 +262,6 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
   const saveNotes = () => { updateCRM('notes', crmNotes); setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); };
   const handleAssign = (target: 'me' | string) => { if (!socket) return; const updates: any = { status: 'Abierto' }; if (target === 'me') { updates.assigned_to = user.username; setAssignedTo(user.username); } else { updates.department = target; updates.assigned_to = null; setAssignedTo(''); setDepartment(target); } socket.emit('update_contact_info', { phone: contact.phone, updates }); setStatus('Abierto'); setShowAssignMenu(false); };
   
-  // MODIFICADO: Seleccionar archivo solo lo guarda en pendingFile
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) setPendingFile(e.target.files[0]); };
   
   const uploadFile = async (file: File) => { 
@@ -251,6 +270,7 @@ export function ChatWindow({ socket, user, contact, config, onBack, onlineUsers,
       formData.append('file', file); 
       formData.append('targetPhone', contact.phone); 
       formData.append('senderName', user.username); 
+      formData.append('originPhoneId', currentAccountId || ''); // ENVÍO DE ORIGEN EN ARCHIVOS
       try { 
           await fetch(`${API_URL}/api/upload`, { method: 'POST', body: formData }); 
       } catch (e) { alert("Error envío"); } 

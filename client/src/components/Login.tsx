@@ -1,85 +1,116 @@
-import { useState, useEffect } from 'react';
-import { User, Lock, ArrowRight, RefreshCw, LogIn, CheckSquare, Square, Users } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, Lock, LogIn, Loader2 } from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (username: string, role: string, password: string, remember: boolean) => void;
+  onLogin: (username: string, role: string, password: '', remember: boolean) => void;
   socket: any;
 }
 
-interface Agent { id: string; name: string; role: string; hasPassword?: boolean; }
-
 export function Login({ onLogin, socket }: LoginProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [passwordInput, setPasswordInput] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState(''); // Campo contraseña (opcional para agentes simples)
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [remember, setRemember] = useState(true);
 
-  useEffect(() => {
-    if (socket) {
-        // Pedimos agentes
-        socket.emit('request_agents');
-        
-        socket.on('agents_list', (list: Agent[]) => {
-            setAgents(list);
-            setLoading(false); // <--- Aquí quitamos el spinner solo cuando llegan datos
-        });
-        
-        socket.on('login_success', (user: any) => onLogin(user.username, user.role, passwordInput, rememberMe));
-        socket.on('login_error', (msg: string) => setError(msg));
-    }
-  }, [socket, passwordInput, rememberMe]);
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim()) return;
+    
+    setIsLoading(true);
+    setError('');
 
-  const handleLogin = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (selectedAgent) {
-          const passToSend = selectedAgent.hasPassword ? passwordInput : "";
-          socket.emit('login_attempt', { name: selectedAgent.name, password: passToSend });
-      }
+    // Emitimos intento de login al servidor
+    socket.emit('login_attempt', { name: username, password });
+
+    // Escuchamos la respuesta una sola vez
+    socket.once('login_success', (data: { username: string, role: string }) => {
+        setIsLoading(false);
+        onLogin(data.username, data.role, '', remember);
+    });
+
+    socket.once('login_error', (msg: string) => {
+        setIsLoading(false);
+        setError(msg || 'Error de conexión');
+    });
+
+    // Timeout de seguridad por si el servidor no responde
+    setTimeout(() => {
+        if(isLoading) {
+            setIsLoading(false);
+            setError("El servidor no responde. Verifica tu conexión.");
+        }
+    }, 5000);
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[500px] w-full max-w-md px-6 animate-in fade-in zoom-in duration-300">
-      <div className="text-center mb-8">
-        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200 rotate-3"><User className="w-8 h-8 text-white" /></div>
-        <h2 className="text-3xl font-bold text-slate-800">{selectedAgent ? `Hola, ${selectedAgent.name}` : 'Bienvenido'}</h2>
-        <p className="text-slate-500 mt-2">Sistema de Gestión</p>
+    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100 animate-in fade-in zoom-in-95 duration-300">
+      <div className="flex justify-center mb-6">
+        <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
+            <span className="text-3xl">💬</span>
+        </div>
       </div>
+      
+      <h2 className="text-2xl font-bold text-center text-slate-800 mb-1">Chatgorithm</h2>
+      <p className="text-center text-slate-400 text-sm mb-8">Acceso al CRM</p>
 
-      {!selectedAgent && (
-          <div className="w-full space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2 relative min-h-[200px]">
-              {loading ? (
-                  // SPINNER MEJORADO Y CENTRADO
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                      <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mb-3" />
-                      <p className="text-sm font-medium">Conectando con servidor...</p>
-                  </div>
-              ) : agents.length === 0 ? (
-                  <div className="text-center text-slate-400 italic border-2 border-dashed border-slate-200 p-8 rounded-xl flex flex-col items-center">
-                      <Users className="w-8 h-8 mb-2 opacity-50"/>
-                      <p>No hay agentes.</p>
-                      <p className="text-xs mt-1">Crea el primer usuario (Admin) para empezar.</p>
-                  </div>
-              ) : (
-                  agents.map((agent) => (
-                      <button key={agent.id} onClick={() => { setSelectedAgent(agent); setError(''); setPasswordInput(''); }} className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left animate-in slide-in-from-bottom-2">
-                          <div className="flex items-center gap-3"><div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold ${agent.role === 'Admin' ? 'bg-purple-600' : 'bg-blue-500'}`}>{agent.name.charAt(0).toUpperCase()}</div><div><h3 className="font-bold text-slate-700">{agent.name}</h3><span className="text-xs text-slate-400">{agent.role}</span></div></div>
-                          <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 transition-transform group-hover:translate-x-1" />
-                      </button>
-                  ))
-              )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Usuario</label>
+          <div className="relative">
+            <User className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-700 font-medium"
+              placeholder="Ej: Pedro"
+              autoFocus
+            />
           </div>
-      )}
+        </div>
 
-      {selectedAgent && (
-          <form onSubmit={handleLogin} className="w-full bg-white p-6 rounded-2xl shadow-lg border border-slate-100 animate-in fade-in slide-in-from-right-4">
-              {selectedAgent.hasPassword ? (<div className="mb-4"><label className="text-xs font-bold text-slate-500 uppercase">Contraseña</label><div className="relative mt-1"><Lock className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" /><input type="password" autoFocus value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full p-3 pl-10 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500" placeholder="••••••" /></div></div>) : <div className="mb-6 text-center p-4 bg-green-50 rounded-xl border border-green-100 text-green-700 text-sm font-medium">Acceso libre</div>}
-              <div className="flex items-center gap-2 mb-4 cursor-pointer w-fit select-none" onClick={() => setRememberMe(!rememberMe)}>{rememberMe ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5 text-slate-400" />}<span className={`text-sm ${rememberMe ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>Mantener sesión iniciada</span></div>
-              {error && <p className="text-xs text-red-500 mb-4 text-center">{error}</p>}
-              <div className="flex gap-2"><button type="button" onClick={() => { setSelectedAgent(null); setPasswordInput(''); }} className="flex-1 py-2 text-slate-500 hover:bg-slate-50 rounded-lg">Volver</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold flex items-center justify-center gap-2">{selectedAgent.hasPassword ? "Verificar" : <>Entrar <LogIn className="w-4 h-4"/></>}</button></div>
-          </form>
-      )}
+        <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Contraseña <span className="text-slate-300 font-normal normal-case">(Opcional)</span></label>
+            <div className="relative">
+                <Lock className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-700"
+                placeholder="••••••"
+                />
+            </div>
+        </div>
+
+        <div className="flex items-center ml-1">
+            <input 
+                type="checkbox" 
+                id="remember" 
+                checked={remember} 
+                onChange={e => setRemember(e.target.checked)}
+                className="rounded text-blue-600 focus:ring-blue-500 border-gray-300"
+            />
+            <label htmlFor="remember" className="ml-2 text-xs text-slate-500 cursor-pointer select-none">Mantener sesión iniciada</label>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 text-red-500 text-sm p-3 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-1">
+            <span className="font-bold">Error:</span> {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={isLoading || !username}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-100 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+        >
+          {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><LogIn className="w-5 h-5" /> Entrar</>}
+        </button>
+      </form>
+
+      <p className="text-center text-xs text-slate-300 mt-6">v2.4.0 • Enterprise Edition</p>
     </div>
   );
 }
